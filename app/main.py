@@ -69,7 +69,11 @@ def render(request: Request, name: str, **ctx) -> HTMLResponse:
     with db.get_conn() as conn:
         ctx.setdefault("pending_count", conn.execute(
             "SELECT COUNT(*) FROM posts WHERE status = 'pending'").fetchone()[0])
-        ctx.setdefault("global_pause", db.get_settings(conn)["global_pause"])
+        settings = db.get_settings(conn)
+        ctx.setdefault("global_pause", settings["global_pause"])
+        ctx.setdefault("veo_auto", settings.get("veo_auto", True))
+        ctx.setdefault("veo_style", settings.get("veo_style", "studio"))
+        ctx.setdefault("veo_ready", bool(config.GEMINI_API_KEY))
         ctx.setdefault("unassigned_count", conn.execute(
             "SELECT COUNT(*) FROM pages WHERE niche = '' AND status != 'archived'").fetchone()[0])
     ctx.setdefault("user", request.session.get("user"))
@@ -468,7 +472,7 @@ def page_detail(request: Request, page_id: str, status_: str = "published", days
         order = "posts.scheduled_at ASC" if status_ in ("pending", "approved") \
         else "COALESCE(posts.published_at, posts.scheduled_at) DESC"
         posts = conn.execute(
-            f"""SELECT posts.*, products.name AS product_name, kits.images AS kit_images, kits.video_path AS kit_video, products.commission_rate
+            f"""SELECT posts.*, products.name AS product_name, kits.images AS kit_images, CASE WHEN kits.ai_video_status = 'ready' THEN kits.ai_video_path ELSE kits.video_path END AS kit_video, products.commission_rate
                 FROM posts LEFT JOIN products ON products.item_id = posts.item_id
                 LEFT JOIN media_kits kits ON kits.id = posts.kit_id
                 WHERE posts.page_id = ? AND posts.status = ? ORDER BY {order} LIMIT 30""",
@@ -549,7 +553,7 @@ def posts_list(request: Request, status: str = "published", page_id: str = "", n
             f"SELECT COUNT(*) FROM posts JOIN pages ON pages.id = posts.page_id WHERE {' AND '.join(where)}",
             args).fetchone()[0]
         rows = conn.execute(
-            f"""SELECT posts.*, pages.name AS page_name, pages.niche, products.name AS product_name, kits.images AS kit_images, kits.video_path AS kit_video
+            f"""SELECT posts.*, pages.name AS page_name, pages.niche, products.name AS product_name, kits.images AS kit_images, CASE WHEN kits.ai_video_status = 'ready' THEN kits.ai_video_path ELSE kits.video_path END AS kit_video
                 FROM posts JOIN pages ON pages.id = posts.page_id
                 LEFT JOIN products ON products.item_id = posts.item_id
                 LEFT JOIN media_kits kits ON kits.id = posts.kit_id
@@ -572,7 +576,7 @@ def review(request: Request, page_id: str = "", flagged: int = 0):
         where.append("posts.flags != '[]'")
     with db.get_conn() as conn:
         rows = conn.execute(
-            f"""SELECT posts.*, pages.name AS page_name, pages.niche, products.name AS product_name, kits.images AS kit_images, kits.video_path AS kit_video,
+            f"""SELECT posts.*, pages.name AS page_name, pages.niche, products.name AS product_name, kits.images AS kit_images, CASE WHEN kits.ai_video_status = 'ready' THEN kits.ai_video_path ELSE kits.video_path END AS kit_video,
                   products.price, products.commission_rate, products.rating, products.sales
                 FROM posts JOIN pages ON pages.id = posts.page_id
                 LEFT JOIN products ON products.item_id = posts.item_id
@@ -814,11 +818,11 @@ def _recent_jobs(conn) -> list:
 
 @app.post("/links")
 def links_add(request: Request, background: BackgroundTasks, links: str = Form(...), niche: str = Form(""),
-              auto_media: str = Form("")):
+              auto_media: str = Form(""), ai_video: str = Form("")):
     with db.get_conn() as conn:
         if niche and niche not in db.niche_names(conn):
             niche = ""
-        ids = quick_add.create_jobs(conn, links, niche, bool(auto_media))
+        ids = quick_add.create_jobs(conn, links, niche, bool(auto_media), bool(ai_video))
     for job_id in ids:
         background.add_task(quick_add.run_job, job_id)
     url = request.headers.get("referer") or "/products"
@@ -939,8 +943,11 @@ def studio_detail(request: Request, item_id: str):
         videos = conn.execute("SELECT * FROM videos WHERE item_id = ?", (item_id,)).fetchall()
         used = conn.execute("""SELECT posts.media_type, COUNT(*) FROM posts WHERE item_id = ? AND status = 'published'
                                GROUP BY 1""", (item_id,)).fetchall()
+    from app.services import veo
+
     return render(request, "studio.html", product=product, images=images, kits=kits, brief=brief,
-                  videos=videos, used=dict(used), themes=studio.designer.THEMES)
+                  videos=videos, used=dict(used), themes=studio.designer.THEMES, veo_styles=veo.VEO_STYLES,
+                  veo_enabled=veo.enabled(), veo_cost_vnd=veo.cost_per_video(config.VEO_MODEL) * config.USD_VND)
 
 
 @app.post("/studio/{item_id}/build")
@@ -949,6 +956,25 @@ def studio_build(request: Request, item_id: str, background: BackgroundTasks, ne
         _mark_processing(conn, [item_id])
     background.add_task(_bg_build, item_id, bool(new_brief))
     return go(f"/studio/{quote(item_id)}", "Đang tạo bộ ảnh + video, tải lại trang sau vài giây")
+
+
+def _bg_ai_video(item_id: str, variant: int, style: str) -> None:
+    with db.get_conn() as conn:
+        studio.build_ai_video(conn, item_id, variant, style or None)
+
+
+@app.post("/studio/{item_id}/ai-video")
+def studio_ai_video(item_id: str, background: BackgroundTasks, variant: int = Form(0), style: str = Form("")):
+    """Tạo video AI bằng Veo 3.1 cho 1 phiên bản (tốn phí theo giây video)."""
+    with db.get_conn() as conn:
+        kit = conn.execute("SELECT id, status FROM media_kits WHERE item_id = ? AND variant = ?",
+                           (item_id, variant)).fetchone()
+        if not kit or kit["status"] != "ready":
+            return go(f"/studio/{quote(item_id)}", "Hãy tạo bộ ảnh trước khi làm video AI", error=True)
+        conn.execute("UPDATE media_kits SET ai_video_status = 'processing', ai_video_error = NULL WHERE id = ?",
+                     (kit["id"],))
+    background.add_task(_bg_ai_video, item_id, variant, style)
+    return go(f"/studio/{quote(item_id)}", "Đang tạo video AI bằng Veo 3.1 (thường 1-3 phút), trang tự tải lại")
 
 
 @app.post("/studio/{item_id}/brief")
@@ -1047,7 +1073,15 @@ def settings_page(request: Request):
         cur = conn.execute(
             "SELECT COUNT(*), COALESCE(AVG(posts_per_day), 3) FROM pages WHERE status = 'active'").fetchone()
         actual = costs.actual_this_month(conn)
-    return render(request, "settings.html", s=s, activity=activity, cost=_cost_table(cur[0], cur[1], s.get("ai_tier", "save")),
+    from app.services import veo
+
+    with db.get_conn() as c2:
+        row = c2.execute("""SELECT COALESCE(SUM(seconds), 0), model FROM video_usage WHERE simulated = 0
+                            AND substr(ts, 1, 7) = ? GROUP BY model""", (db.now().strftime("%Y-%m"),)).fetchall()
+        veo_month_usd = sum(r[0] * veo.price_per_second(r[1]) for r in row)
+    return render(request, "settings.html", s=s, activity=activity, veo_styles=veo.VEO_STYLES, veo_enabled=veo.enabled(),
+                  veo_models=veo.MODELS, veo_video_vnd=veo.cost_per_video(config.VEO_MODEL) * config.USD_VND,
+                  veo_month_vnd=veo_month_usd * config.USD_VND, cost=_cost_table(cur[0], cur[1], s.get("ai_tier", "save")),
                   actual=actual, posts_per_day=cur[1])
 
 
@@ -1068,7 +1102,8 @@ def settings_save(request: Request, min_commission_rate: float = Form(...), min_
                   min_sales: int = Form(...), max_pages_per_product_per_day: int = Form(...),
                   repeat_product_after_days: int = Form(...), post_hours: str = Form(...),
                   blacklist: str = Form(""), disclosure: str = Form(...), media_variants: int = Form(2),
-                  kit_media: str = Form("alternate"), ai_tier: str = Form("save")):
+                  kit_media: str = Form("alternate"), ai_tier: str = Form("save"), veo_style: str = Form("studio"),
+                  veo_audio: str = Form("mute"), veo_auto: bool = Form(False)):
     try:
         hours = sorted({int(h) for h in post_hours.replace(" ", "").split(",") if h})
         assert hours and all(0 <= h <= 23 for h in hours)
@@ -1083,6 +1118,7 @@ def settings_save(request: Request, min_commission_rate: float = Form(...), min_
             "disclosure": disclosure.strip(), "media_variants": max(1, min(media_variants, 6)),
             "kit_media": kit_media if kit_media in ("alternate", "album", "video") else "alternate",
             "ai_tier": ai_tier if ai_tier in ("save", "balanced", "quality") else "save",
+            "veo_style": veo_style, "veo_audio": "keep" if veo_audio == "keep" else "mute", "veo_auto": veo_auto,
         }.items():
             db.set_setting(conn, key, value)
         db.log(conn, "info", "Cập nhật cài đặt chung")

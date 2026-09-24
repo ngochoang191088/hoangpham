@@ -251,3 +251,44 @@ def render_set(photos: list[Image.Image], brief: dict, product: dict, variant: i
     slides = plan_slides(brief, len(photos))
     return [render_slide(photos[src], kind, brief, product, theme, size, idx, len(slides), point, mirror)
             for idx, (kind, src, point) in enumerate(slides)]
+
+
+def veo_frame(photo: Image.Image, theme: dict, size=STORY) -> Image.Image:
+    """Khung hình đầu cho Veo: chỉ có sản phẩm (không chữ) trên nền sạch, để AI chuyển động hoá.
+
+    Không in chữ lên khung này vì AI sẽ làm méo chữ; chữ được chèn lại sau khi có video.
+    """
+    W, H = size
+    canvas = _gradient(size, "#FFFFFF", theme["top"]).convert("RGBA")
+    # bóng đổ mềm dưới sản phẩm
+    shadow = Image.new("RGBA", size, (0, 0, 0, 0))
+    ImageDraw.Draw(shadow).ellipse((W * 0.2, H * 0.7, W * 0.8, H * 0.76), fill=(0, 0, 0, 60))
+    canvas.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(30)))
+    fitted = ImageOps.contain(photo, (int(W * 0.86), int(H * 0.56)), Image.LANCZOS).convert("RGBA")
+    # nền trắng của ảnh Shopee hoà vào nền: điểm gần trắng thành trong suốt (viền làm mềm)
+    mask = fitted.convert("L").point(lambda v: 0 if v > 243 else 255).filter(ImageFilter.GaussianBlur(1.5))
+    fitted.putalpha(mask)
+    canvas.alpha_composite(fitted, ((W - fitted.width) // 2, int(H * 0.72) - fitted.height))
+    return canvas.convert("RGB")
+
+
+def video_overlay(brief: dict, product: dict, theme: dict, size=STORY) -> Image.Image:
+    """Lớp chữ trong suốt đặt lên video Veo: tiêu đề phía trên, giá phía dưới."""
+    W, H = size
+    layer = Image.new("RGBA", size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    pad = 90
+    fnt, lines = _fit_text(draw, brief["headline"], W - pad * 2 - 60, 2, 70, 40)
+    box_h = int(fnt.size * 1.2 * len(lines)) + 60
+    top = 150
+    draw.rounded_rectangle((pad, top, W - pad, top + box_h), 36, fill=(*ImageColor.getrgb(theme["top"]), 225))
+    _draw_lines(draw, lines, fnt, pad + 30, top + 26, theme["text"], align="center", max_w=W - pad * 2 - 60)
+    if brief.get("badge"):
+        _pill(draw, (pad, top - 70), brief["badge"].upper(), font(30), theme["accent"], theme["on_accent"])
+    price = _price(product)
+    if price:
+        pf = font(60)
+        text = f"Chỉ từ {price}"
+        w = draw.textlength(text, font=pf) + 80
+        _pill(draw, ((W - w) / 2, H - 330), text, pf, theme["accent"], theme["on_accent"], pad=(40, 22))
+    return layer

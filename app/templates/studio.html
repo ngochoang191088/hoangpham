@@ -88,7 +88,31 @@
   </div>
   <div class="row small" style="margin-top:8px">
     {% for path in kit.images | loads %}<a href="{{ path | media }}" download>⬇ Ảnh {{ loop.index }}</a>{% endfor %}
-    {% if kit.video_path %}<a href="{{ kit.video_path | media }}" download>⬇ Video</a>{% endif %}
+    {% if kit.video_path %}<a href="{{ kit.video_path | media }}" download>⬇ Video trình chiếu</a>{% endif %}
+  </div>
+
+  <div style="margin-top:16px; padding-top:14px; border-top:1px solid var(--line)">
+    <div class="row" style="justify-content: space-between; align-items:flex-start">
+      <div>
+        <b>🎬 Video AI (Veo 3.1)</b>
+        {% if kit.ai_video_status == 'ready' %}<span class="pill published">Đã xong · {{ kit.ai_video_model }}</span>
+        {% elif kit.ai_video_status == 'processing' %}<span class="pill pending">Đang tạo… (1-3 phút)</span>
+        {% elif kit.ai_video_status == 'error' %}<span class="pill failed">Lỗi</span>{% endif %}
+        <div class="small muted">Veo lấy ảnh sản phẩm (không chữ) làm khung đầu và tạo chuyển động ~{{ config.VEO_SECONDS }} giây; app chèn lại tiêu đề, giá và cảnh cuối kêu gọi mua.
+          Chưa có giọng đọc. {% if veo_enabled %}Chi phí ≈ {{ (veo_cost_vnd / 1000) | round | int }}.000đ / video.{% else %}<b>Chưa có GEMINI_API_KEY: đang giả lập</b> (không tốn tiền).{% endif %}</div>
+        {% if kit.ai_video_error %}<div class="flag">{{ kit.ai_video_error }}</div>{% endif %}
+      </div>
+      <form method="post" action="/studio/{{ product.item_id | urlencode }}/ai-video" class="row">
+        <input type="hidden" name="variant" value="{{ kit.variant }}">
+        <select name="style">{% for k, v in veo_styles.items() %}<option value="{{ k }}" {{ 'selected' if k == veo_style }}>{{ v[0] }}</option>{% endfor %}</select>
+        <button class="primary" {{ 'disabled' if kit.ai_video_status == 'processing' }}>{{ 'Tạo lại' if kit.ai_video_status == 'ready' else 'Tạo video AI' }}</button>
+      </form>
+    </div>
+    {% if kit.ai_video_status == 'ready' %}
+      <video src="{{ kit.ai_video_path | media }}" poster="{{ (kit.ai_video_path | replace('video_ai.mp4', 'veo_frame.jpg')) | media }}" controls preload="metadata" style="height:420px; aspect-ratio:9/16; border-radius:8px; background:#000; margin-top:10px"></video>
+      <div class="small"><a href="{{ kit.ai_video_path | media }}" download>⬇ Tải video AI</a></div>
+    {% endif %}
+    {% if kit.ai_video_status == 'processing' %}<script>setTimeout(() => location.reload(), 10000)</script>{% endif %}
   </div>
   {% endif %}
 </div>

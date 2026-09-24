@@ -172,10 +172,12 @@ def pick_media(conn, item_id: str, page_id: str, kit_media: str = "alternate", s
     video = pick_video(conn, item_id, page_id)
     if video:
         return "video", video["id"], None
-    kits = conn.execute("SELECT id, video_path FROM media_kits WHERE item_id = ? AND status = 'ready' ORDER BY variant",
-                        (item_id,)).fetchall()
+    kits = conn.execute("""SELECT id, video_path, ai_video_status FROM media_kits
+                           WHERE item_id = ? AND status = 'ready' ORDER BY variant""", (item_id,)).fetchall()
     if kits:
         kit = kits[zlib.crc32(page_id.encode()) % len(kits)]
+        if kit["ai_video_status"] == "ready" and kit_media != "album":
+            return "kit_video", None, kit["id"]                   # có video AI (Veo): ưu tiên video
         if kit_media == "video" or (kit_media == "alternate" and (seq + zlib.crc32(page_id.encode())) % 2):
             return ("kit_video", None, kit["id"]) if kit["video_path"] else ("album", None, kit["id"])
         return "album", None, kit["id"]
@@ -220,7 +222,8 @@ def publish_due(conn) -> tuple[int, int]:
         elif r["media_type"] in ("album", "kit_video") and r["kit_id"]:
             kit = conn.execute("SELECT * FROM media_kits WHERE id = ? AND status = 'ready'", (r["kit_id"],)).fetchone()
             if kit and r["media_type"] == "kit_video":
-                video = {"file_path": kit["video_path"]}
+                ai_ready = kit["ai_video_status"] == "ready" and kit["ai_video_path"]
+                video = {"file_path": kit["ai_video_path"] if ai_ready else kit["video_path"]}
             elif kit:
                 images = json.loads(kit["images"])
         try:

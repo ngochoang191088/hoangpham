@@ -43,6 +43,12 @@ AI_BATCH = os.getenv("AI_BATCH", "1") == "1"
 AI_BATCH_MIN = int(os.getenv("AI_BATCH_MIN", "20"))
 USD_VND = float(os.getenv("USD_VND", "26000"))
 
+# Google Gemini API (aistudio.google.com) để tạo video bằng Veo 3.1. Để trống = giả lập (không tốn tiền).
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+VEO_MODEL = os.getenv("VEO_MODEL", "veo-3.1-lite-generate-001")
+VEO_RESOLUTION = os.getenv("VEO_RESOLUTION", "720p")
+VEO_SECONDS = int(os.getenv("VEO_SECONDS", "8"))
+
 DB_PATH = os.getenv("DB_PATH", "data/app.db")
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "data/uploads")
 MEDIA_DIR = os.getenv("MEDIA_DIR", "data/media")      # ảnh gốc tải về + ảnh/video app tạo

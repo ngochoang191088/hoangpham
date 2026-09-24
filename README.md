@@ -35,6 +35,10 @@ AI viết bài, app tự đăng **video** (nếu sản phẩm có video) hoặc 
    - Mỗi sản phẩm có **nhiều phiên bản** khác màu / bố cục / ảnh bìa; mỗi page dùng 1 phiên bản riêng để
      các page không đăng ảnh giống hệt nhau. Bạn sửa được chữ trên ảnh rồi bấm *Lưu & dựng lại*.
    - Bài đăng dùng **album 3-5 ảnh** hoặc **video ngắn** (xen kẽ, đổi trong *Cài đặt*).
+   - **🎬 Video AI bằng Google Veo 3.1**: app đặt ảnh sản phẩm (không chữ) lên khung 9:16 làm khung đầu,
+     Veo tạo chuyển động ~8 giây giữ nguyên sản phẩm (kiểu: quay studio / cận cảnh rồi lùi ra / bối cảnh sử dụng),
+     rồi app chèn lại tiêu đề + giá và nối cảnh cuối kêu gọi mua (~10 giây). Có video AI thì bài video ưu tiên dùng.
+     Bấm tạo trong Studio, hoặc tick *Tạo video AI* khi dán link. Chưa có giọng đọc (làm sau).
 5. **AI viết bài** cho từng page, dựa trên tên, giá, mô tả bạn cung cấp, theo giọng văn của page.
    Nội dung được kiểm duyệt tự động (từ cấm, câu gây hiểu lầm, trùng lặp giữa các page).
 6. **Bạn duyệt** ở trang *Duyệt bài* (1 nút duyệt tất cả bài sạch), app **tự đăng** đúng giờ,
@@ -105,11 +109,24 @@ Cách app tiết kiệm token: xếp ngành bằng từ khoá (0 token); Haiku k
 (≈350 token/ảnh thay vì ~800); AI soạn chữ **1 lần mỗi sản phẩm** rồi dùng lại cho mọi phiên bản ảnh/video;
 chỉnh ảnh + dựng video chạy trên máy chủ (0 token); bài hằng ngày viết qua **Batch API** (giảm 50%).
 
-### 3. (Tuỳ chọn) Shopee Affiliate Open API
+### 3. Google Veo 3.1 (video AI)
+Tạo API key tại https://aistudio.google.com/apikey (tài khoản Google Cloud có bật thanh toán), điền `GEMINI_API_KEY`.
+Chưa có key thì app **giả lập** (chuyển động ảnh tĩnh) để bạn xem thử luồng, không tốn tiền.
+
+| `VEO_MODEL` | Giá tham khảo | ≈ / video 8 giây |
+|---|---|---|
+| `veo-3.1-lite-generate-001` (mặc định, rẻ nhất) | ~0,05 USD/giây | ~10.000đ |
+| `veo-3.1-generate-preview` (đẹp nhất) | ~0,40 USD/giây | ~83.000đ |
+
+Giá Veo thay đổi theo thời điểm và nguồn công bố khác nhau: **kiểm tra bảng giá Gemini API trước khi chạy nhiều**.
+Video AI tốn hơn nhiều so với phần còn lại, nên app mặc định chỉ làm video AI cho phiên bản 1 của mỗi sản phẩm.
+API Gemini không cho tắt tiếng khi tạo: app mặc định tắt tiếng Veo (dùng nhạc nền nếu có), đổi trong *Cài đặt*.
+
+### 4. (Tuỳ chọn) Shopee Affiliate Open API
 Điền `SHOPEE_APP_ID`, `SHOPEE_APP_SECRET` nếu muốn app tự lấy tên / giá / ảnh / % hoa hồng từ link sản phẩm
 và đồng bộ hoa hồng thật. Không bắt buộc: bạn tự nhập link aff là đủ.
 
-### 4. Chạy tự động (cron trên VPS)
+### 5. Chạy tự động (cron trên VPS)
 
 ```cron
 # Xử lý nốt link Shopee đang chờ (nếu app khởi động lại giữa chừng)
@@ -161,7 +178,8 @@ app/
     studio.py          lấy ảnh gốc → AI soạn chữ → dựng ảnh + video, nhiều phiên bản
     creative.py        Claude xem ảnh, soạn chữ trên ảnh / video (JSON)
     designer.py        chỉnh ảnh + thiết kế ảnh 4:5 và khung 9:16 (Pillow, font Be Vietnam Pro)
-    video_maker.py     dựng video ngắn (ffmpeg)
+    video_maker.py     dựng video ngắn, ghép video AI + chữ + cảnh cuối (ffmpeg)
+    veo.py             video AI bằng Google Veo 3.1 (Gemini API, image-to-video)
     pipeline.py        nhận diện page → tạo bài → đăng → đồng bộ số liệu
     shopee.py          nhận diện sản phẩm từ link Shopee (+ Open API tuỳ chọn)
     quick_add.py       dán link -> nhận diện -> xếp ngành -> tạo ảnh + video (chạy nền)

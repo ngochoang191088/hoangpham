@@ -163,6 +163,51 @@ def build_kit(conn, item_id: str, variant: int = 0, brief: dict | None = None, n
     return kit_id
 
 
+def build_ai_video(conn, item_id: str, variant: int = 0, style: str | None = None) -> None:
+    """Video AI bằng Veo 3.1 cho 1 phiên bản: ảnh sản phẩm -> clip Veo -> chèn chữ + cảnh cuối."""
+    from app.services import veo
+
+    kit = conn.execute("SELECT * FROM media_kits WHERE item_id = ? AND variant = ?", (item_id, variant)).fetchone()
+    if not kit or kit["status"] != "ready":
+        raise RuntimeError("Hãy tạo bộ ảnh cho sản phẩm trước")
+    settings = db.get_settings(conn)
+    conn.execute("UPDATE media_kits SET ai_video_status = 'processing', ai_video_error = NULL WHERE id = ?", (kit["id"],))
+    conn.commit()
+    try:
+        product = dict(conn.execute("SELECT * FROM products WHERE item_id = ?", (item_id,)).fetchone())
+        brief = json.loads(kit["brief"])
+        paths = source_images(conn, item_id, fetch=False)
+        if not paths:
+            raise RuntimeError("Chưa có ảnh sản phẩm")
+        order = [i for i in brief.get("image_order") or [] if i < len(paths)] or [0]
+        photo = designer.enhance(paths[order[variant % len(order)]])
+        theme = designer.THEMES[(zlib.crc32(item_id.encode()) + variant) % len(designer.THEMES)]
+        out = _dir("kits", _safe(item_id), f"v{variant}")
+        frame = out / "veo_frame.jpg"
+        designer.veo_frame(photo, theme).save(frame, "JPEG", quality=92)
+        overlay = out / "veo_overlay.png"
+        designer.video_overlay(brief, product, theme).save(overlay)
+        stories = sorted(out.glob("story_*.jpg"), key=lambda p: int(p.stem.split("_")[1]))
+        if not stories:
+            raise RuntimeError("Thiếu cảnh cuối, hãy dựng lại bộ ảnh")
+        clip = out / "veo_clip.mp4"
+        info = veo.generate(str(frame), veo.build_prompt(product, style or settings.get("veo_style", "studio")),
+                            str(clip))
+        conn.execute("INSERT INTO video_usage(ts, model, seconds, simulated) VALUES (?, ?, ?, ?)",
+                     (db.now_iso(), info["model"], info["seconds"], int(info["simulated"])))
+        final = out / "video_ai.mp4"
+        video_maker.compose_ad(str(clip), str(overlay), str(stories[-1]), str(final),
+                               keep_audio=settings.get("veo_audio") == "keep",
+                               music=video_maker.pick_music(zlib.crc32(item_id.encode()) + variant))
+        conn.execute("""UPDATE media_kits SET ai_video_status = 'ready', ai_video_path = ?, ai_video_model = ?,
+                        ai_video_error = NULL WHERE id = ?""",
+                     (str(final), info["model"] + (" (giả lập)" if info["simulated"] else ""), kit["id"]))
+    except Exception as e:  # noqa: BLE001
+        conn.execute("UPDATE media_kits SET ai_video_status = 'error', ai_video_error = ? WHERE id = ?",
+                     (str(e)[:500], kit["id"]))
+        db.log(conn, "error", f"Tạo video AI lỗi cho sản phẩm {item_id}: {e}")
+
+
 def build_all_variants(conn, item_id: str, new_brief: bool = False, brief: dict | None = None,
                        record_usage=None) -> None:
     """Làm (lại) đủ số phiên bản theo cài đặt. Phiên bản 0 soạn chữ, các phiên bản sau dùng lại."""

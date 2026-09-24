@@ -10,9 +10,11 @@ https://s.shopee.vn/XyZ123"></textarea></label>
     <div class="form-grid" style="grid-template-columns:1fr; align-content:start">
       <label>Ngành hàng<select name="niche"><option value="">Tự nhận diện</option>
         {% for n in niches %}<option>{{ n }}</option>{% endfor %}</select></label>
-      <label class="row small" style="flex-direction:row"><input type="checkbox" name="auto_media" value="1" checked> Tạo luôn 3-5 ảnh + video</label>
+      <label class="row small" style="flex-direction:row"><input type="checkbox" name="auto_media" value="1" checked> Tạo luôn 3-5 ảnh + video trình chiếu</label>
+      <label class="row small" style="flex-direction:row"><input type="checkbox" name="ai_video" value="1" {{ 'checked' if veo_auto }}> 🎬 Tạo video AI bằng Veo 3.1
+        {% if not veo_ready %}<span class="muted">(chưa có GEMINI_API_KEY: giả lập)</span>{% endif %}</label>
       <button class="primary">Nhận diện & tạo</button>
-      <span class="small muted">App đọc tên, giá, ảnh, mô tả, lượt bán từ Shopee → xếp ngành → AI soạn chữ → dựng ảnh + video (~20-40 giây/link).</span>
+      <span class="small muted">App đọc tên, giá, ảnh, mô tả, lượt bán từ Shopee → xếp ngành → AI soạn chữ → thiết kế ảnh → Veo 3.1 làm video từ ảnh sản phẩm (1-3 phút/link).</span>
     </div>
   </form>
   {% if jobs %}

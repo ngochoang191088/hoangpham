@@ -107,6 +107,8 @@ def seed(n_pages: int = 82, days: int = 30, kit_niches: int = 8) -> None:
                                   (SELECT item_id FROM videos) ORDER BY score DESC LIMIT 1""", (niche,)).fetchone()
             if row:
                 studio.build_all_variants(conn, row[0])
+                if niche in list(db.DEFAULT_NICHES)[:3]:          # video AI (giả lập Veo khi chưa có key)
+                    studio.build_ai_video(conn, row[0], 0)
         pipeline.generate_drafts(conn, db.now())
         conn.execute("UPDATE posts SET status = 'approved' WHERE status = 'pending' AND id % 3 != 0")
         pipeline.publish_due(conn)

@@ -22,13 +22,14 @@ def parse_lines(text: str) -> list[tuple[str, str]]:
     return list(dict.fromkeys(out))
 
 
-def create_jobs(conn, text: str, niche: str = "", auto_media: bool = True) -> list[int]:
+def create_jobs(conn, text: str, niche: str = "", auto_media: bool = True, ai_video: bool = False) -> list[int]:
     now = db.now_iso()
     ids = []
     for link, aff in parse_lines(text)[:200]:
         cur = conn.execute(
-            "INSERT INTO link_jobs(input, aff_link, niche, auto_media, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (link, aff, niche, int(auto_media), now, now))
+            "INSERT INTO link_jobs(input, aff_link, niche, auto_media, ai_video, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (link, aff, niche, int(auto_media), int(auto_media and ai_video), now, now))
         ids.append(cur.lastrowid)
     return ids
 
@@ -88,6 +89,14 @@ def run_job(job_id: int) -> None:
                 if kit and kit["status"] == "error":
                     _step(conn, job_id, "error", "Đã lưu sản phẩm, tạo ảnh lỗi", error=kit["error"])
                     return
+                if job["ai_video"]:
+                    _step(conn, job_id, "running", "Đã có ảnh. Đang tạo video AI bằng Veo 3.1 (1-3 phút)…")
+                    studio.build_ai_video(conn, item_id, 0)
+                    kit = conn.execute("SELECT ai_video_status, ai_video_error FROM media_kits WHERE item_id = ? "
+                                       "AND variant = 0", (item_id,)).fetchone()
+                    if kit["ai_video_status"] == "error":
+                        _step(conn, job_id, "error", "Đã có ảnh, video AI lỗi", error=kit["ai_video_error"])
+                        return
             _step(conn, job_id, "done", f"Xong · ngành “{niche}” ({how})")
         except Exception as e:  # noqa: BLE001
             _step(conn, job_id, "error", "Lỗi", error=str(e)[:500])

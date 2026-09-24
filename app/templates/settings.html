@@ -15,6 +15,12 @@
         <label>Khung giờ đăng (giờ, cách nhau dấu phẩy)<input name="post_hours" value="{{ s.post_hours | join(', ') }}"></label>
         <label>Chế độ AI<select name="ai_tier">
           {% for k, v in {'save':'Tiết kiệm nhất (Haiku 4.5)','balanced':'Cân bằng (Sonnet 5 viết bài)','quality':'Chất lượng cao (Opus 5)'}.items() %}<option value="{{ k }}" {{ 'selected' if s.ai_tier == k }}>{{ v }}</option>{% endfor %}</select></label>
+        <label>Video AI Veo 3.1: kiểu chuyển động<select name="veo_style">
+          {% for k, v in veo_styles.items() %}<option value="{{ k }}" {{ 'selected' if s.veo_style == k }}>{{ v[0] }}</option>{% endfor %}</select></label>
+        <label>Video AI: âm thanh<select name="veo_audio">
+          <option value="mute" {{ 'selected' if s.veo_audio == 'mute' }}>Tắt tiếng Veo (dùng nhạc nền nếu có)</option>
+          <option value="keep" {{ 'selected' if s.veo_audio == 'keep' }}>Giữ âm thanh Veo tạo</option></select></label>
+        <label class="row" style="flex-direction:row; align-items:center"><input type="checkbox" name="veo_auto" value="true" {{ 'checked' if s.veo_auto }}> Dán link Shopee: mặc định tạo luôn video AI</label>
         <label>Số phiên bản bộ ảnh/video mỗi sản phẩm<input type="number" name="media_variants" min="1" max="6" value="{{ s.media_variants }}"></label>
         <label>Đăng bộ media app tạo dạng<select name="kit_media">
           {% for k, v in {'alternate':'Xen kẽ album ảnh & video','album':'Luôn album 3-5 ảnh','video':'Luôn video ngắn'}.items() %}<option value="{{ k }}" {{ 'selected' if s.kit_media == k }}>{{ v }}</option>{% endfor %}</select></label>
@@ -47,6 +53,8 @@
       <tr><td>Facebook</td><td>{{ '✅ Đăng nhập bằng Facebook' if config.FB_LOGIN_ENABLED else ('✅ System User' if config.FB_ENABLED else '⚪ DEMO') }}
         {% if s.owner_name %}<div class="small muted">Tài khoản: {{ s.owner_name }}{% if s.owner_token_expires %} · cần đăng nhập lại trước {{ s.owner_token_expires[:10] }}{% endif %}</div>{% endif %}</td></tr>
       <tr><td>Shopee Open API</td><td>{{ '✅ Đã kết nối' if config.SHOPEE_ENABLED else '⚪ Không dùng (nhập link aff thủ công)' }}</td></tr>
+      <tr><td>Google Veo 3.1</td><td>{{ ('✅ ' ~ veo_models.get(config.VEO_MODEL, config.VEO_MODEL) ~ ' · ≈ ' ~ ((veo_video_vnd / 1000) | round | int) ~ '.000đ/video ' ~ config.VEO_SECONDS ~ 's') if veo_enabled else '⚪ Chưa có GEMINI_API_KEY (giả lập)' }}
+        {% if veo_month_vnd %}<div class="small muted">Tháng này: ≈ {{ veo_month_vnd | vnd }}</div>{% endif %}</td></tr>
       <tr><td>Claude AI</td><td>{{ '✅ Đã kết nối' if config.AI_ENABLED else '⚪ Chưa có API key (dùng mẫu có sẵn)' }}</td></tr>
     </table>
   </div>

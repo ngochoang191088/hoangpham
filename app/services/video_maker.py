@@ -81,3 +81,53 @@ def probe_duration(path: str) -> float:
             h, m, s = line.split("Duration:")[1].split(",")[0].strip().split(":")
             return int(h) * 3600 + int(m) * 60 + float(s)
     return 0.0
+
+
+def has_audio(path: str) -> bool:
+    result = subprocess.run([ffmpeg_exe(), "-i", path], capture_output=True, text=True)
+    return "Audio:" in result.stderr
+
+
+def animate_still(image: str, out_path: str, seconds: float = 8.0) -> str:
+    """Chuyển động nhẹ 1 ảnh tĩnh (dùng giả lập Veo ở chế độ DEMO)."""
+    frames = int(seconds * FPS)
+    cmd = [ffmpeg_exe(), "-y", "-loglevel", "error", "-i", image,
+           "-vf", f"scale=1188:2112,zoompan=z='min(zoom+0.0009,1.1)':d={frames}:x='iw/2-(iw/zoom/2)'"
+                  f":y='ih/2-(ih/zoom/2)+on*0.15':s=720x1280:fps={FPS},format=yuv420p",
+           "-t", f"{seconds}", "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", out_path]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    if result.returncode != 0:
+        raise RuntimeError(f"Dựng video lỗi: {result.stderr.strip()[-300:]}")
+    return out_path
+
+
+def compose_ad(clip: str, overlay_png: str, end_card: str, out_path: str, keep_audio: bool = False,
+               music: str | None = None, end_seconds: float = 3.0, fade: float = 0.5) -> str:
+    """Video quảng cáo hoàn chỉnh: clip AI (Veo) + lớp chữ (tiêu đề, giá) + cảnh cuối kêu gọi mua."""
+    clip_len = probe_duration(clip)
+    if clip_len <= 0:
+        raise RuntimeError("Không đọc được video từ AI")
+    total = clip_len + end_seconds - fade
+    cmd = [ffmpeg_exe(), "-y", "-loglevel", "error", "-i", clip, "-i", overlay_png,
+           "-loop", "1", "-t", f"{end_seconds}", "-i", end_card]
+    use_clip_audio = keep_audio and has_audio(clip)
+    if not use_clip_audio:
+        if music:
+            cmd += ["-stream_loop", "-1", "-i", music]
+        else:
+            cmd += ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100"]
+    graph = [
+        "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,setsar=1[c]",
+        "[c][1:v]overlay=0:0,format=yuv420p[v0]",
+        "[2:v]scale=1080:1920,fps=30,setsar=1,format=yuv420p[v1]",
+        f"[v0][v1]xfade=transition=fade:duration={fade}:offset={clip_len - fade:.2f}[v]",
+    ]
+    audio_in = "0:a" if use_clip_audio else "3:a"
+    graph.append(f"[{audio_in}]apad,atrim=0:{total:.2f},afade=t=out:st={max(0, total - 1):.2f}:d=1[a]")
+    cmd += ["-filter_complex", ";".join(graph), "-map", "[v]", "-map", "[a]", "-t", f"{total:.2f}",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "22", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", out_path]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    if result.returncode != 0:
+        raise RuntimeError(f"Ghép video lỗi: {result.stderr.strip()[-400:]}")
+    return out_path

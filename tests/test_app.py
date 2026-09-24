@@ -557,3 +557,72 @@ def test_detect_product_from_short_aff_link(monkeypatch):
     with db.get_conn() as conn:
         from app.services import catalog
         assert catalog.guess_niche(conn, info["name"], info["categories"])[0] == "Âm thanh"
+
+
+def test_veo_generate_calls_gemini_api(monkeypatch, tmp_path):
+    """Veo: gửi ảnh sản phẩm làm khung đầu, 9:16, chờ xong, tải video về."""
+    import sys
+    from types import ModuleType, SimpleNamespace as NS
+
+    from app import config
+    from app.services import veo
+    monkeypatch.setattr(config, "GEMINI_API_KEY", "k")
+    frame = tmp_path / "f.jpg"
+    frame.write_bytes(b"jpg")
+    calls = {}
+
+    class Ops:
+        n = 0
+
+        def get(self, op):
+            Ops.n += 1
+            return NS(done=True, error=None, result=NS(generated_videos=[NS(video="VIDEO")]), response=None)
+
+    class Models:
+        def generate_videos(self, model, source, config):
+            calls.update(model=model, prompt=source.prompt, image=source.image, config=config)
+            return NS(done=False)
+
+    class Files:
+        def download(self, file, destination):
+            calls["download"] = (file, destination)
+            open(destination, "wb").write(b"mp4")
+
+    real_types = __import__("google.genai.types", fromlist=["types"])
+    fake_genai = ModuleType("google.genai")
+    fake_genai.Client = lambda api_key: NS(models=Models(), operations=Ops(), files=Files())
+    fake_genai.types = real_types
+    import google
+    monkeypatch.setattr(google, "genai", fake_genai, raising=False)
+    monkeypatch.setitem(sys.modules, "google.genai", fake_genai)
+    monkeypatch.setattr(veo.time, "sleep", lambda s: None)
+
+    out = tmp_path / "clip.mp4"
+    info = veo.generate(str(frame), veo.build_prompt({"name": "Nồi chiên"}), str(out), model="veo-3.1-lite-generate-001")
+    assert info == {"seconds": 8, "model": "veo-3.1-lite-generate-001", "simulated": False}
+    assert calls["config"].aspect_ratio == "9:16" and calls["config"].duration_seconds == 8
+    assert calls["image"].image_bytes == b"jpg" and "Nồi chiên" in calls["prompt"] and "Do not add any text" in calls["prompt"]
+    assert calls["download"] == ("VIDEO", str(out)) and out.read_bytes() == b"mp4"
+    assert veo.cost_per_video("veo-3.1-lite-generate-001") < veo.cost_per_video("veo-3.1-generate-preview")
+
+
+def test_ai_video_in_studio_and_posts(client):
+    """Studio: tạo video AI (giả lập khi chưa có key) -> bài video dùng video AI."""
+    from app.services import video_maker
+    with db.get_conn() as conn:
+        item_id = conn.execute("SELECT item_id FROM media_kits WHERE status = 'ready' AND variant = 0").fetchone()[0]
+    r = client.post(f"/studio/{item_id}/ai-video", data={"variant": "0", "style": "reveal"})
+    assert r.status_code == 200
+    with db.get_conn() as conn:
+        kit = conn.execute("SELECT * FROM media_kits WHERE item_id = ? AND variant = 0", (item_id,)).fetchone()
+        assert kit["ai_video_status"] == "ready", kit["ai_video_error"]
+        assert "giả lập" in kit["ai_video_model"]
+        assert 9 < video_maker.probe_duration(kit["ai_video_path"]) < 13        # clip 8s + cảnh cuối
+        assert tuple(conn.execute("SELECT seconds, simulated FROM video_usage").fetchone()) == (8, 1)
+        page_id = conn.execute("SELECT id FROM pages WHERE status = 'active' LIMIT 1").fetchone()[0]
+        conn.execute("UPDATE media_kits SET status = 'error' WHERE item_id = ? AND variant != 0", (item_id,))
+        assert pipeline.pick_media(conn, item_id, page_id, "alternate", 0)[0] == "kit_video"
+        assert pipeline.pick_media(conn, item_id, page_id, "album", 0)[0] == "album"
+        conn.execute("UPDATE media_kits SET status = 'ready' WHERE item_id = ?", (item_id,))
+    html = client.get(f"/studio/{item_id}").text
+    assert "video_ai.mp4" in html and "Video AI (Veo 3.1)" in html

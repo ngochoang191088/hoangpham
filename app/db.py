@@ -115,6 +115,7 @@ CREATE TABLE IF NOT EXISTS link_jobs (
     aff_link TEXT NOT NULL DEFAULT '',
     niche TEXT NOT NULL DEFAULT '',       -- ngành chọn sẵn; trống = tự nhận diện
     auto_media INTEGER NOT NULL DEFAULT 1,
+    ai_video INTEGER NOT NULL DEFAULT 0,  -- tạo thêm video AI bằng Veo
     status TEXT NOT NULL DEFAULT 'queued',  -- queued | running | need_niche | done | error
     step TEXT NOT NULL DEFAULT '',
     item_id TEXT,
@@ -122,6 +123,14 @@ CREATE TABLE IF NOT EXISTS link_jobs (
     error TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS video_usage (   -- số giây video AI (Veo) đã tạo, để tính chi phí
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT NOT NULL,
+    model TEXT NOT NULL,
+    seconds REAL NOT NULL,
+    simulated INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS conversions (
@@ -186,7 +195,11 @@ DEFAULT_SETTINGS = {
     "disclosure": "#tiepthilienket",
     # Bộ media app tạo: số phiên bản khác nhau mỗi sản phẩm; cách dùng khi đăng bài
     "media_variants": 2,
-    "ai_tier": "save",          # save (Haiku 4.5, rẻ nhất) | balanced | quality — xem services/ai_models.py
+    "ai_tier": "save",
+    # Video AI bằng Veo 3.1 (Gemini API)
+    "veo_style": "studio",      # kiểu chuyển động, xem services/veo.py
+    "veo_audio": "mute",        # mute (tắt tiếng Veo, dùng nhạc nền nếu có) | keep (giữ âm thanh Veo tạo)
+    "veo_auto": True,           # dán link Shopee -> tự tạo luôn video Veo          # save (Haiku 4.5, rẻ nhất) | balanced | quality — xem services/ai_models.py
     "kit_media": "alternate",   # alternate (xen kẽ album ảnh / video) | album | video
 }
 
@@ -258,6 +271,9 @@ MIGRATIONS = {
     "products": {"aff_link": "TEXT NOT NULL DEFAULT ''", "description": "TEXT NOT NULL DEFAULT ''",
                  "source": "TEXT NOT NULL DEFAULT 'manual'", "sample_caption": "TEXT NOT NULL DEFAULT ''"},
     "posts": {"media_type": "TEXT NOT NULL DEFAULT 'photo'", "video_id": "INTEGER", "kit_id": "INTEGER"},
+    "link_jobs": {"ai_video": "INTEGER NOT NULL DEFAULT 0"},
+    "media_kits": {"ai_video_status": "TEXT NOT NULL DEFAULT ''", "ai_video_path": "TEXT NOT NULL DEFAULT ''",
+                   "ai_video_error": "TEXT", "ai_video_model": "TEXT NOT NULL DEFAULT ''"},
 }
 
 
