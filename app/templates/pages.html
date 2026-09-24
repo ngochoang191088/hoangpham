@@ -1,13 +1,17 @@
 {% extends "base.html" %}
 {% block title %}Page{% endblock %}
 {% block content %}
-<h1>Tất cả page ({{ rows | length }})</h1>
+<div class="row" style="justify-content: space-between; margin-bottom: 12px">
+  <h1 style="margin:0">Tất cả page ({{ total | num }})</h1>
+  <a class="btn primary" href="/pages/new">+ Thêm page</a>
+</div>
 <form class="filters" method="get">
-  <input name="q" value="{{ q }}" placeholder="Tìm tên page…">
-  <select name="niche"><option value="">Mọi ngách</option>{% for n in niches %}<option {{ 'selected' if n == niche }}>{{ n }}</option>{% endfor %}</select>
+  <input name="q" value="{{ q }}" placeholder="Tìm tên hoặc ID page…">
+  <select name="niche"><option value="">Mọi ngành hàng</option>{% for n in niches %}<option {{ 'selected' if n == niche }}>{{ n }}</option>{% endfor %}
+    <option value="__none__" {{ 'selected' if niche == '__none__' }}>(Chưa phân ngành)</option></select>
   <select name="status_">
     <option value="">Mọi trạng thái</option>
-    {% for k, v in {'active':'Hoạt động','paused':'Tạm dừng','restricted':'Bị hạn chế'}.items() %}<option value="{{ k }}" {{ 'selected' if k == status_ }}>{{ v }}</option>{% endfor %}
+    {% for k, v in {'active':'Hoạt động','paused':'Tạm dừng','restricted':'Bị hạn chế','archived':'Đã gỡ'}.items() %}<option value="{{ k }}" {{ 'selected' if k == status_ }}>{{ v }}</option>{% endfor %}
   </select>
   <input type="hidden" name="sort" value="{{ sort }}">
   <button>Lọc</button>
@@ -15,15 +19,15 @@
 {% macro sortlink(key, label) %}<a href="?niche={{ niche | urlencode }}&status_={{ status_ }}&q={{ q | urlencode }}&sort={{ key }}">{{ label }}{{ ' ↓' if sort == key }}</a>{% endmacro %}
 <div class="card table-wrap">
 <table>
-  <tr><th>{{ sortlink('name', 'Page') }}</th><th>Ngách</th><th>Trạng thái</th><th class="num">Bài/ngày</th>
+  <tr><th>{{ sortlink('name', 'Page') }}</th><th>Ngành hàng</th><th>Trạng thái</th><th class="num">Bài/ngày</th>
     <th class="num">{{ sortlink('posts', 'Bài 30 ngày') }}</th><th class="num">{{ sortlink('engagement', 'Tương tác') }}</th>
     <th class="num">{{ sortlink('orders', 'Đơn') }}</th><th class="num">{{ sortlink('commission', 'Hoa hồng') }}</th>
     <th>{{ sortlink('last', 'Bài gần nhất') }}</th><th>Chờ duyệt / lỗi</th><th></th></tr>
   {% for p in rows %}
   <tr>
     <td><a href="/pages/{{ p.id }}"><b>{{ p.name }}</b></a></td>
-    <td><span class="pill niche">{{ p.niche }}</span></td>
-    <td><span class="pill {{ p.status }}">{{ {'active':'Hoạt động','paused':'Tạm dừng','restricted':'Bị hạn chế'}[p.status] }}</span></td>
+    <td>{% if p.niche %}<span class="pill niche">{{ p.niche }}</span>{% else %}<a class="pill pending" href="/pages/new">Chưa phân ngành</a>{% endif %}</td>
+    <td><span class="pill {{ p.status }}">{{ {'active':'Hoạt động','paused':'Tạm dừng','restricted':'Bị hạn chế','archived':'Đã gỡ'}[p.status] }}</span></td>
     <td class="num">{{ p.posts_per_day }}</td>
     <td class="num">{{ p.posts }}</td>
     <td class="num">{{ p.engagement | num }}</td>
@@ -32,10 +36,16 @@
     <td class="small muted">{{ p.last_published[:16].replace('T',' ') if p.last_published else '—' }}</td>
     <td>{% if p.pending %}<a href="/review?page_id={{ p.id }}">{{ p.pending }} chờ</a>{% endif %}
         {% if p.failed %}<a class="flag" href="/posts?status=failed&page_id={{ p.id }}">{{ p.failed }} lỗi</a>{% endif %}</td>
-    <td>{% if p.status != 'restricted' %}<form class="inline" method="post" action="/pages/{{ p.id }}/toggle">
+    <td>{% if p.status in ('active', 'paused') %}<form class="inline" method="post" action="/pages/{{ p.id }}/toggle">
       <button class="small">{{ 'Dừng' if p.status == 'active' else '▶ Bật' }}</button></form>{% endif %}</td>
   </tr>
   {% endfor %}
 </table>
+{% set qs = 'niche=' ~ (niche | urlencode) ~ '&status_=' ~ status_ ~ '&q=' ~ (q | urlencode) ~ '&sort=' ~ sort %}
+<div class="pager">
+  {% if p > 1 %}<a class="btn" href="?{{ qs }}&p={{ p - 1 }}">← Trước</a>{% endif %}
+  <span class="muted small">Trang {{ p }} / {{ ((total + per - 1) // per) or 1 }}</span>
+  {% if p * per < total %}<a class="btn" href="?{{ qs }}&p={{ p + 1 }}">Sau →</a>{% endif %}
+</div>
 </div>
 {% endblock %}

@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Ngành hàng{% endblock %}
+{% block content %}
+<div class="row" style="justify-content: space-between; margin-bottom: 12px">
+  <h1 style="margin:0">Ngành hàng ({{ rows | length }})</h1>
+  <div class="row">
+    <div class="tabs" style="margin:0; border:none">
+      {% for d in (7, 30, 90) %}<a class="{{ 'on' if days == d }}" href="?days={{ d }}">{{ d }} ngày</a>{% endfor %}
+    </div>
+    <a class="btn primary" href="#them-nganh">+ Thêm ngành hàng</a>
+  </div>
+</div>
+<p class="muted">Mỗi ngành hàng có số page mục tiêu (ví dụ 5 page/ngành). AI chỉ lấy sản phẩm đúng ngành cho page thuộc ngành đó.
+  Một sản phẩm tối đa được đăng trên vài page cùng ngành mỗi ngày để tránh trùng lặp.</p>
+
+<div class="card table-wrap" style="margin-bottom:16px">
+<table>
+  <tr><th>Ngành hàng</th><th>Số page / mục tiêu</th><th class="num">Sản phẩm trong kho</th><th class="num">Bài {{ days }} ngày</th>
+    <th class="num">Đơn</th><th class="num">Hoa hồng</th><th class="num">TB / page</th><th></th></tr>
+  {% for n in rows %}
+  <tr>
+    <td><a href="/pages?niche={{ n.niche | urlencode }}"><b>{{ n.niche }}</b></a></td>
+    <td style="min-width:160px">
+      <div class="row small"><b>{{ n.pages }}</b> / {{ n.target_pages }}
+        {% if n.pages < n.target_pages %}<a class="pill pending" href="/pages/new?niche={{ n.niche | urlencode }}">thiếu {{ n.target_pages - n.pages }}</a>
+        {% elif n.pages > n.target_pages %}<span class="pill niche">dư {{ n.pages - n.target_pages }}</span>
+        {% else %}<span class="pill published">đủ</span>{% endif %}</div>
+      <div class="bar"><span style="width: {{ [100, (n.pages / (n.target_pages or 1) * 100)] | min | round }}%"></span></div>
+    </td>
+    <td class="num">{{ n.products }}</td>
+    <td class="num">{{ n.posts | num }}</td>
+    <td class="num">{{ n.orders | num }}</td>
+    <td class="num"><b>{{ n.commission | vnd }}</b></td>
+    <td class="num">{{ (n.commission / n.pages if n.pages else 0) | vnd }}</td>
+    <td><a class="btn small" href="#sua-{{ loop.index }}" onclick="document.getElementById('sua-{{ loop.index }}').open = true">Sửa</a></td>
+  </tr>
+  {% endfor %}
+</table>
+</div>
+
+<div class="grid" style="grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); margin-bottom:16px">
+  {% for n in rows %}
+  <div class="card">
+    <div class="row" style="justify-content: space-between">
+      <h2 style="margin:0">{{ n.niche }}</h2>
+      <a class="small" href="/pages/new?niche={{ n.niche | urlencode }}">+ Thêm page</a>
+    </div>
+    <div class="small muted" style="margin:4px 0 8px">Từ khoá: {{ (n.keywords | loads) | join(', ') or '—' }}</div>
+    {% for pg in by_niche.get(n.niche, []) %}
+      <div class="row small" style="justify-content: space-between; padding:3px 0; border-bottom: 1px solid var(--line)">
+        <a href="/pages/{{ pg.id }}">{{ pg.name }}</a>
+        <span class="pill {{ pg.status }}">{{ {'active':'Hoạt động','paused':'Tạm dừng','restricted':'Bị hạn chế'}[pg.status] }}</span>
+      </div>
+    {% else %}<div class="small muted">Chưa có page nào.</div>{% endfor %}
+    <details id="sua-{{ loop.index }}" style="margin-top:10px">
+      <summary class="small" style="cursor:pointer">Sửa ngành hàng</summary>
+      <form method="post" action="/niches/update" class="form-grid" style="grid-template-columns:1fr; margin-top:8px">
+        <input type="hidden" name="old_name" value="{{ n.niche }}">
+        <label>Tên ngành hàng<input name="name" value="{{ n.niche }}" required></label>
+        <label>Từ khoá săn sản phẩm (cách nhau dấu phẩy)<textarea name="keywords" style="min-height:70px">{{ (n.keywords | loads) | join(', ') }}</textarea></label>
+        <label>Số page mục tiêu<input type="number" name="target_pages" min="0" value="{{ n.target_pages }}"></label>
+        <label>Giọng văn mặc định cho page mới<input name="default_tone" value="{{ n.default_tone }}"></label>
+        <button class="primary">Lưu</button>
+      </form>
+      <form method="post" action="/niches/delete" style="margin-top:8px">
+        <input type="hidden" name="name" value="{{ n.niche }}">
+        <button class="small" onclick="return confirm('Xoá ngành hàng {{ n.niche }}?')">Xoá ngành hàng</button>
+      </form>
+    </details>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="card" id="them-nganh">
+  <h2>Thêm ngành hàng</h2>
+  <form method="post" action="/niches" class="form-grid">
+    <label>Tên ngành hàng<input name="name" placeholder="Ví dụ: Đồ ăn vặt" required></label>
+    <label>Số page mục tiêu<input type="number" name="target_pages" min="0" value="5"></label>
+    <label>Giọng văn mặc định<input name="default_tone" value="thân thiện, gần gũi"></label>
+    <label style="grid-column: 1 / -1">Từ khoá săn sản phẩm trên Shopee (cách nhau dấu phẩy)
+      <input name="keywords" placeholder="bánh tráng, khô gà, hạt dinh dưỡng, trà sữa"></label>
+    <div><button class="primary">Tạo ngành hàng</button></div>
+  </form>
+</div>
+{% endblock %}

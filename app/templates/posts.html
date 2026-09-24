@@ -10,7 +10,7 @@
 <form class="filters" method="get">
   <input type="hidden" name="status" value="{{ status }}">
   <select name="page_id"><option value="">Mọi page</option>{% for pg in pages %}<option value="{{ pg.id }}" {{ 'selected' if pg.id == page_id }}>{{ pg.name }}</option>{% endfor %}</select>
-  <select name="niche"><option value="">Mọi ngách</option>{% for n in niches %}<option {{ 'selected' if n == niche }}>{{ n }}</option>{% endfor %}</select>
+  <select name="niche"><option value="">Mọi ngành hàng</option>{% for n in niches %}<option {{ 'selected' if n == niche }}>{{ n }}</option>{% endfor %}</select>
   <input type="date" name="day" value="{{ day }}">
   <input name="q" value="{{ q }}" placeholder="Tìm trong nội dung…">
   <label class="row small"><input type="checkbox" name="flagged" value="1" {{ 'checked' if flagged }}> Chỉ bài bị gắn cờ</label>

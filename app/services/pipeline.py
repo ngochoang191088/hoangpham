@@ -20,8 +20,9 @@ def hunt_products(conn) -> int:
     """Tìm sản phẩm hoa hồng cao cho từng ngách và lưu vào kho."""
     s = db.get_settings(conn)
     count = 0
-    for niche, keywords in s["niches"].items():
-        for kw in keywords:
+    for n in db.get_niches(conn):
+        niche = n["name"]
+        for kw in n["keywords"]:
             try:
                 items = shopee.search_products(kw)
             except Exception as e:  # noqa: BLE001 - ghi log và chạy tiếp
@@ -63,11 +64,13 @@ def generate_drafts(conn, day: datetime | None = None) -> int:
     day_str = day.date().isoformat()
     since = (day - timedelta(days=s["repeat_product_after_days"])).isoformat()
 
-    pages = conn.execute("SELECT * FROM pages WHERE status = 'active' ORDER BY id").fetchall()
+    pages = conn.execute(
+        "SELECT * FROM pages WHERE status = 'active' AND niche != '' ORDER BY niche, id").fetchall()
     usage: dict[str, int] = {}          # số page dùng mỗi sản phẩm trong ngày
-    day_captions: dict[str, list[str]] = {}  # caption trong ngày theo sản phẩm
-    created = 0
+    candidates_by_niche: dict[str, list] = {}
+    jobs = []                           # (page, product, giờ đăng)
 
+    # Bước 1: chọn sản phẩm + giờ đăng cho từng page
     for idx, page in enumerate(pages):
         have = conn.execute(
             "SELECT COUNT(*) FROM posts WHERE page_id = ? AND date(scheduled_at) = ?",
@@ -80,12 +83,13 @@ def generate_drafts(conn, day: datetime | None = None) -> int:
             "SELECT item_id FROM posts WHERE page_id = ? AND created_at >= ? AND item_id IS NOT NULL",
             (page["id"], since),
         )}
-        candidates = conn.execute(
-            "SELECT * FROM products WHERE niche = ? AND blocked = 0 ORDER BY score DESC LIMIT 60",
-            (page["niche"],),
-        ).fetchall()
+        if page["niche"] not in candidates_by_niche:
+            candidates_by_niche[page["niche"]] = conn.execute(
+                "SELECT * FROM products WHERE niche = ? AND blocked = 0 ORDER BY score DESC LIMIT 200",
+                (page["niche"],),
+            ).fetchall()
         chosen = []
-        for p in candidates:
+        for p in candidates_by_niche[page["niche"]]:
             if p["item_id"] in recent or usage.get(p["item_id"], 0) >= s["max_pages_per_product_per_day"]:
                 continue
             chosen.append(p)
@@ -95,31 +99,41 @@ def generate_drafts(conn, day: datetime | None = None) -> int:
         if not chosen:
             db.log(conn, "warn", "Không còn sản phẩm phù hợp để tạo bài", page["id"])
             continue
+        jobs += [(page, p, when) for p, when in zip(chosen, _slots(day, s["post_hours"], len(chosen), idx * 7))]
 
-        for p, when in zip(chosen, _slots(day, s["post_hours"], len(chosen), idx * 7)):
-            try:
-                caption = ai_writer.write_caption(dict(page), dict(p), s["disclosure"])
-            except Exception as e:  # noqa: BLE001
-                db.log(conn, "error", f"AI lỗi khi viết bài cho '{p['name']}': {e}", page["id"])
-                continue
-            flags = ai_writer.check_content(caption, s, day_captions.get(p["item_id"], []))
-            day_captions.setdefault(p["item_id"], []).append(caption)
-            status = "approved" if page["auto_approve"] and not flags else "pending"
-            now = db.now_iso()
-            cur = conn.execute(
-                """INSERT INTO posts(page_id, item_id, caption, image_url, status, flags, scheduled_at,
-                       created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (page["id"], p["item_id"], caption, p["image_url"], status,
-                 json.dumps(flags, ensure_ascii=False), when.isoformat(), now, now),
-            )
-            post_id = cur.lastrowid
-            try:
-                link = shopee.make_link(p["offer_link"] or p["product_link"], page["id"], post_id)
-            except Exception as e:  # noqa: BLE001
-                link = ""
-                db.log(conn, "error", f"Không tạo được link aff cho bài #{post_id}: {e}", page["id"])
-            conn.execute("UPDATE posts SET aff_link = ? WHERE id = ?", (link, post_id))
-            created += 1
+    # Bước 2: AI viết toàn bộ caption một lần (Batch API khi số lượng lớn)
+    def record_usage(model, tin, tout, batch):
+        conn.execute("INSERT INTO ai_usage(ts, model, input_tokens, output_tokens, batch) VALUES (?, ?, ?, ?, ?)",
+                     (db.now_iso(), model, tin, tout, int(batch)))
+
+    captions = ai_writer.write_captions(
+        [{"page": dict(pg), "product": dict(p)} for pg, p, _ in jobs], s["disclosure"], record_usage)
+
+    # Bước 3: kiểm duyệt, lưu bài, tạo link aff
+    day_captions: dict[str, list[str]] = {}  # caption trong ngày theo sản phẩm
+    created = 0
+    for (page, p, when), (caption, error) in zip(jobs, captions):
+        if error:
+            db.log(conn, "error", f"AI lỗi khi viết bài cho '{p['name']}': {error}", page["id"])
+            continue
+        flags = ai_writer.check_content(caption, s, day_captions.get(p["item_id"], []))
+        day_captions.setdefault(p["item_id"], []).append(caption)
+        status = "approved" if page["auto_approve"] and not flags else "pending"
+        now = db.now_iso()
+        cur = conn.execute(
+            """INSERT INTO posts(page_id, item_id, caption, image_url, status, flags, scheduled_at,
+                   created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (page["id"], p["item_id"], caption, p["image_url"], status,
+             json.dumps(flags, ensure_ascii=False), when.isoformat(), now, now),
+        )
+        post_id = cur.lastrowid
+        try:
+            link = shopee.make_link(p["offer_link"] or p["product_link"], page["id"], post_id)
+        except Exception as e:  # noqa: BLE001
+            link = ""
+            db.log(conn, "error", f"Không tạo được link aff cho bài #{post_id}: {e}", page["id"])
+        conn.execute("UPDATE posts SET aff_link = ? WHERE id = ?", (link, post_id))
+        created += 1
 
     db.log(conn, "info", f"Đã tạo {created} bài nháp cho ngày {day_str}")
     return created
@@ -208,7 +222,7 @@ def import_pages(conn) -> int:
                ON CONFLICT(id) DO UPDATE SET name = excluded.name, access_token = excluded.access_token""",
             (p["id"], p["name"], p.get("access_token", ""), db.now_iso()),
         )
-    db.log(conn, "info", f"Đồng bộ {len(pages)} page từ Meta Business")
+    db.log(conn, "info", f"Đồng bộ {len(pages)} page từ Meta Business (page mới cần được phân ngành hàng)")
     return len(pages)
 
 

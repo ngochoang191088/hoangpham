@@ -84,3 +84,4 @@ button.ok { background: var(--ok); border-color: var(--ok); color: #fff; }
 .bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
 .bar > span { display: block; height: 100%; background: var(--accent); }
 .pager { display: flex; gap: 8px; margin-top: 16px; align-items: center; }
+button:disabled { opacity: .5; cursor: not-allowed; }

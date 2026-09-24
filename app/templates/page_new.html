@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Thêm page{% endblock %}
+{% block content %}
+<a class="small" href="/pages">← Tất cả page</a>
+<h1 style="margin-top:4px">Thêm page</h1>
+
+<div class="card" style="margin-bottom:16px">
+  <h2>Số page theo ngành hàng</h2>
+  <div class="row" style="gap:6px">
+    {% for n in niches %}
+      <a class="pill {{ 'published' if n.pages >= n.target_pages else 'pending' }}" href="?niche={{ n.name | urlencode }}">
+        {{ n.name }}: {{ n.pages }}/{{ n.target_pages }}</a>
+    {% endfor %}
+    <a class="small" href="/niches">Quản lý ngành hàng →</a>
+  </div>
+</div>
+
+{% if unassigned %}
+<div class="card" style="margin-bottom:16px">
+  <h2>Page chưa phân ngành hàng ({{ unassigned | length }})</h2>
+  <p class="muted small">Page nhập từ Meta sẽ nằm ở đây. Chọn ngành hàng cho từng page rồi bấm Lưu. Page chưa có ngành thì AI chưa tạo bài.</p>
+  <form method="post" action="/pages/assign">
+    <div class="table-wrap"><table>
+      {% for pg in unassigned %}
+      <tr><td><a href="/pages/{{ pg.id }}">{{ pg.name }}</a><div class="small muted">ID {{ pg.id }}</div></td>
+        <td><select name="niche_{{ pg.id }}"><option value="">— chọn ngành hàng —</option>
+          {% for n in niches %}<option value="{{ n.name }}">{{ n.name }} ({{ n.pages }}/{{ n.target_pages }})</option>{% endfor %}</select></td></tr>
+      {% endfor %}
+    </table></div>
+    <p><button class="primary">Lưu phân ngành</button></p>
+  </form>
+</div>
+{% endif %}
+
+<div class="grid half">
+  <div class="card">
+    <h2>1. Nhập từ Meta Business (khuyên dùng)</h2>
+    <p class="muted small">Lấy toàn bộ page mà System User đang quản lý, kèm token. Page mới sẽ hiện ở mục “chưa phân ngành hàng” để bạn chọn ngành.</p>
+    <form method="post" action="/pages/import-meta">
+      <button class="primary" {{ 'disabled' if not config.FB_ENABLED }}>⟳ Nhập page từ Meta</button>
+      {% if not config.FB_ENABLED %}<div class="small muted" style="margin-top:6px">Cần điền FB_SYSTEM_USER_TOKEN trong file .env.</div>{% endif %}
+    </form>
+
+    <h2 style="margin-top:24px">2. Thêm một page</h2>
+    <form method="post" action="/pages/add" class="form-grid">
+      <label>ID page<input name="page_id" inputmode="numeric" placeholder="1029384756" required></label>
+      <label>Tên page<input name="name" required></label>
+      <label>Ngành hàng<select name="niche"><option value="">(Chưa phân ngành)</option>
+        {% for n in niches %}<option value="{{ n.name }}" {{ 'selected' if n.name == niche }}>{{ n.name }} ({{ n.pages }}/{{ n.target_pages }})</option>{% endfor %}</select></label>
+      <label>Số bài mỗi ngày<input type="number" name="posts_per_day" min="0" max="20" value="3"></label>
+      <label>Vị trí link<select name="link_mode"><option value="comment">Trong bình luận đầu tiên</option><option value="post">Trong nội dung bài</option></select></label>
+      <label>Giọng văn (bỏ trống = theo ngành hàng)<input name="tone"></label>
+      <label style="grid-column: 1 / -1">Page access token (bỏ trống nếu dùng “Nhập từ Meta”)<input name="access_token" autocomplete="off"></label>
+      <div><button class="primary">Thêm page</button></div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>3. Thêm hàng loạt</h2>
+    <p class="muted small">Mỗi dòng một page theo dạng <code>ID page | Tên page | Ngành hàng</code>. Bỏ trống ngành hàng thì dùng ngành chọn bên dưới.
+      Có thể dán thẳng từ Excel/Google Sheet (thay cột bằng dấu |).</p>
+    <form method="post" action="/pages/bulk" class="form-grid" style="grid-template-columns:1fr">
+      <textarea name="lines" style="min-height:260px; font-family:monospace; font-size:12px" placeholder="1029384756 | Săn Deal Bếp 1 | Gia dụng nhà bếp
+1029384757 | Săn Deal Bếp 2 | Gia dụng nhà bếp
+1029384758 | Góc Da Đẹp 1 | Chăm sóc da"></textarea>
+      <label>Ngành hàng mặc định<select name="niche"><option value="">(Chưa phân ngành)</option>
+        {% for n in niches %}<option value="{{ n.name }}" {{ 'selected' if n.name == niche }}>{{ n.name }}</option>{% endfor %}</select></label>
+      <label>Số bài mỗi ngày<input type="number" name="posts_per_day" min="0" max="20" value="3"></label>
+      <div><button class="primary">Thêm tất cả</button></div>
+    </form>
+  </div>
+</div>
+{% endblock %}

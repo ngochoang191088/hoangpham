@@ -15,6 +15,7 @@
     <span class="brand">🛒 Aff Pages</span>
     {% set path = request.url.path %}
     <a class="item {{ 'on' if path == '/' }}" href="/">Tổng quan</a>
+    <a class="item {{ 'on' if path.startswith('/niches') }}" href="/niches">Ngành hàng</a>
     <a class="item {{ 'on' if path.startswith('/pages') }}" href="/pages">Page</a>
     <a class="item {{ 'on' if path.startswith('/review') }}" href="/review">Duyệt bài {% if pending_count %}<span class="badge">{{ pending_count }}</span>{% endif %}</a>
     <a class="item {{ 'on' if path.startswith('/posts') }}" href="/posts">Bài đăng</a>
@@ -27,6 +28,9 @@
     </form>
   </nav>
 </header>
-<main>{% block content %}{% endblock %}</main>
+<main>
+  {% if request.query_params.get('msg') %}<div class="alert {{ 'error' if request.query_params.get('err') else 'ok' }}">{{ request.query_params.get('msg') }}</div>{% endif %}
+  {% block content %}{% endblock %}
+</main>
 </body>
 </html>

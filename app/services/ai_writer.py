@@ -1,5 +1,6 @@
 """Viết caption bằng Claude API và kiểm duyệt nội dung tự động."""
 import random
+import time
 
 from app import config
 
@@ -37,36 +38,109 @@ def _facts(product: dict) -> str:
 
 
 def write_caption(page: dict, product: dict, disclosure: str) -> str:
-    angle = random.choice(ANGLES)
-    if config.AI_ENABLED:
-        text = _claude_caption(page, product, angle)
+    """Viết 1 caption (dùng cho dữ liệu mẫu / trường hợp lẻ)."""
+    (caption, error), = write_captions([{"page": page, "product": product}], disclosure)
+    if error:
+        raise RuntimeError(error)
+    return caption
+
+
+def write_captions(jobs: list[dict], disclosure: str, record_usage=None) -> list[tuple[str | None, str | None]]:
+    """Viết caption cho nhiều bài. Mỗi job: {"page": dict, "product": dict}.
+
+    Trả về danh sách (caption, lỗi) theo đúng thứ tự jobs.
+    Nhiều bài (>= AI_BATCH_MIN) thì gửi qua Message Batches API: rẻ hơn 50%, thường xong trong < 1 giờ.
+    record_usage(model, input_tokens, output_tokens, batch) được gọi để ghi lại chi phí thật.
+    """
+    prompts = [_user_prompt(j["page"], j["product"], random.choice(ANGLES)) for j in jobs]
+    if not config.AI_ENABLED:
+        texts = [(_template_caption(j["product"], p["angle"]), None) for j, p in zip(jobs, prompts)]
+    elif config.AI_BATCH and len(jobs) >= config.AI_BATCH_MIN:
+        texts = _claude_batch([p["text"] for p in prompts], record_usage)
     else:
-        text = _template_caption(product, angle)
-    return f"{text.strip()}\n\n{disclosure}"
+        texts = [_claude_one(p["text"], record_usage) for p in prompts]
+    return [(f"{t.strip()}\n\n{disclosure}" if t else None, err) for t, err in texts]
 
 
-def _claude_caption(page: dict, product: dict, angle: str) -> str:
+def _user_prompt(page: dict, product: dict, angle: str) -> dict:
+    text = (
+        f"Page: {page['name']} (ngành hàng: {page['niche']}; giọng văn: {page['tone']})\n"
+        f"Góc viết: {angle}\n\nThông tin sản phẩm:\n{_facts(product)}"
+    )
+    return {"angle": angle, "text": text}
+
+
+# Model hỗ trợ tự chuyển sang model dự phòng khi bị từ chối (chỉ khi gọi lẻ, Batch API không hỗ trợ)
+FALLBACK_MODELS = {"claude-opus-5", "claude-fable-5-1"}
+
+
+def _params(text: str) -> dict:
+    params = {
+        "model": config.AI_MODEL,
+        "max_tokens": 16000,
+        "system": SYSTEM_PROMPT,
+        "messages": [{"role": "user", "content": text}],
+    }
+    if not config.AI_MODEL.startswith("claude-haiku"):
+        params["output_config"] = {"effort": config.AI_EFFORT}
+    return params
+
+
+def _text_of(message) -> tuple[str | None, str | None]:
+    if message.stop_reason == "refusal":
+        return None, "AI từ chối viết bài cho sản phẩm này"
+    text = "".join(b.text for b in message.content if b.type == "text").strip()
+    return (text, None) if text else (None, "AI không trả về nội dung")
+
+
+def _client():
     import anthropic
 
-    client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
-    response = client.beta.messages.create(
-        model=config.AI_MODEL,
-        max_tokens=16000,
-        betas=["server-side-fallback-2026-07-01"],
-        fallbacks="default",
-        output_config={"effort": "medium"},
-        system=SYSTEM_PROMPT,
-        messages=[{
-            "role": "user",
-            "content": (
-                f"Page: {page['name']} (ngách: {page['niche']}; giọng văn: {page['tone']})\n"
-                f"Góc viết: {angle}\n\nThông tin sản phẩm:\n{_facts(product)}"
-            ),
-        }],
-    )
-    if response.stop_reason == "refusal":
-        raise RuntimeError("AI từ chối viết bài cho sản phẩm này")
-    return "".join(b.text for b in response.content if b.type == "text")
+    return anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+
+
+def _claude_one(text: str, record_usage) -> tuple[str | None, str | None]:
+    import anthropic
+
+    params = _params(text)
+    try:
+        if config.AI_MODEL in FALLBACK_MODELS:
+            msg = _client().beta.messages.create(
+                **params, betas=["server-side-fallback-2026-07-01"], fallbacks="default")
+        else:
+            msg = _client().messages.create(**params)
+    except anthropic.APIError as e:
+        return None, f"Lỗi Claude API: {e}"
+    if record_usage:
+        record_usage(msg.model, msg.usage.input_tokens, msg.usage.output_tokens, False)
+    return _text_of(msg)
+
+
+def _claude_batch(texts: list[str], record_usage, poll_seconds: int = 30,
+                  max_wait_seconds: int = 6 * 3600) -> list[tuple[str | None, str | None]]:
+    client = _client()
+    batch = client.messages.batches.create(
+        requests=[{"custom_id": str(i), "params": _params(t)} for i, t in enumerate(texts)])
+    waited = 0
+    while batch.processing_status != "ended":
+        if waited >= max_wait_seconds:
+            client.messages.batches.cancel(batch.id)
+            return [(None, "Batch quá thời gian chờ")] * len(texts)
+        time.sleep(poll_seconds)
+        waited += poll_seconds
+        batch = client.messages.batches.retrieve(batch.id)
+
+    results: list[tuple[str | None, str | None]] = [(None, "Không có kết quả")] * len(texts)
+    for item in client.messages.batches.results(batch.id):
+        idx = int(item.custom_id)
+        if item.result.type == "succeeded":
+            msg = item.result.message
+            if record_usage:
+                record_usage(msg.model, msg.usage.input_tokens, msg.usage.output_tokens, True)
+            results[idx] = _text_of(msg)
+        else:
+            results[idx] = (None, f"Batch: {item.result.type}")
+    return results
 
 
 def _template_caption(product: dict, angle: str) -> str:

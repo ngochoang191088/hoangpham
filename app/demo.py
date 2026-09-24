@@ -1,4 +1,4 @@
-"""Tạo dữ liệu mẫu: 80 page, sản phẩm, 30 ngày lịch sử bài đăng và hoa hồng.
+"""Tạo dữ liệu mẫu: 80 page chia theo ngành hàng (5 page/ngành), sản phẩm, 30 ngày lịch sử bài đăng và hoa hồng.
 
     python -m app.demo          # tạo mới (xoá dữ liệu cũ trong DB)
 """
@@ -10,14 +10,7 @@ from pathlib import Path
 from app import config, db
 from app.services import ai_writer, pipeline
 
-NAMES = {
-    "Mẹ & bé": ["Góc Của Mẹ", "Bé Yêu Mỗi Ngày", "Mẹ Bỉm Sữa Thông Thái", "Nhà Có Con Nhỏ"],
-    "Gia dụng": ["Bếp Nhà Mình", "Gia Dụng Thông Minh", "Nội Trợ Vui", "Căn Bếp Nhỏ"],
-    "Làm đẹp": ["Đẹp Mỗi Ngày", "Skincare Cho Người Bận", "Góc Làm Đẹp", "Da Khoẻ Xinh"],
-    "Thời trang": ["Mặc Đẹp Mỗi Ngày", "Tủ Đồ Tối Giản", "Phối Đồ Công Sở", "Style Sinh Viên"],
-    "Công nghệ": ["Đồ Công Nghệ Rẻ", "Phụ Kiện Hay", "Tech Nhỏ Xinh", "Góc Đồ Điện Tử"],
-    "Nhà cửa": ["Decor Nhà Xinh", "Nhà Gọn Gàng", "Phòng Trọ Đẹp", "Ở Nhà Vui"],
-}
+STYLES = ["Săn Deal", "Góc", "Review Nhanh", "Tiệm", "Chợ"]
 TONES = ["thân thiện, gần gũi", "vui nhộn, trẻ trung", "ngắn gọn, thực tế", "nhẹ nhàng, tinh tế"]
 
 
@@ -26,10 +19,18 @@ def seed(n_pages: int = 80, days: int = 30) -> None:
     db.init_db()
     rnd = random.Random(42)
     with db.get_conn() as conn:
-        niches = list(NAMES)
-        for i in range(n_pages):
-            niche = niches[i % len(niches)]
-            name = f"{NAMES[niche][(i // len(niches)) % 4]} {i // (len(niches) * 4) + 1}"
+        niches = list(db.DEFAULT_NICHES)
+        # 5 page mỗi ngành; ngành cuối mới có 3 page; 2 page vừa nhập từ Meta chưa phân ngành
+        assigned = [n for idx, n in enumerate(niches) for _ in range(5 if idx < len(niches) - 1 else 3)]
+        while len(assigned) < n_pages - 2:
+            assigned += niches
+        assigned = assigned[:max(0, n_pages - 2)] + ["", ""]
+        counter: dict[str, int] = {}
+        for i, niche in enumerate(assigned[:n_pages]):
+            counter[niche] = counter.get(niche, 0) + 1
+            k = counter[niche]
+            name = (f"{STYLES[(k - 1) % len(STYLES)]} {niche} {(k - 1) // len(STYLES) + 1}" if niche
+                    else f"Page mới nhập từ Meta {k}")
             status = "restricted" if i in (13, 57) else "paused" if i == 71 else "active"
             conn.execute(
                 """INSERT INTO pages(id, name, niche, tone, status, posts_per_day, link_mode, created_at)
@@ -48,7 +49,7 @@ def seed(n_pages: int = 80, days: int = 30) -> None:
         for d in range(days, 0, -1):
             day = db.now() - timedelta(days=d)
             for idx, page in enumerate(pages):
-                if page["status"] == "paused" and d < 10:
+                if (page["status"] == "paused" and d < 10) or not page["niche"]:
                     continue
                 strength = 0.4 + (idx * 37 % 100) / 60      # page mạnh/yếu khác nhau
                 for when in pipeline._slots(day, s["post_hours"], page["posts_per_day"], idx * 7):

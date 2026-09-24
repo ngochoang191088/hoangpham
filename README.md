@@ -1,7 +1,8 @@
 # Aff Pages: quản lý 80 fanpage Facebook chạy affiliate Shopee
 
-Web app để **AI làm việc hằng ngày, bạn chỉ kiểm soát**:
+Web app để **AI làm việc hằng ngày, bạn chỉ kiểm soát**. Chạy tốt từ 80 đến 500 page.
 
+0. **Ngành hàng**: chia page theo ngành (ví dụ 5 page/ngành), mỗi ngành có từ khoá săn sản phẩm riêng; app báo ngành nào đang thiếu page.
 1. **Săn sản phẩm** hoa hồng cao trên Shopee Affiliate theo từng ngách (lọc % hoa hồng, sao, lượt bán, từ cấm).
 2. **AI viết bài** riêng cho từng page theo giọng văn của page (Claude API), tạo link aff gắn mã page + mã bài.
 3. **Tự kiểm duyệt**: gắn cờ bài có từ cấm, thiếu ghi chú tiếp thị liên kết, câu dễ gây hiểu lầm, trùng nội dung giữa các page.
@@ -10,10 +11,14 @@ Web app để **AI làm việc hằng ngày, bạn chỉ kiểm soát**:
 6. **Báo cáo**: hoa hồng, đơn, tương tác theo ngày / page / ngách / sản phẩm; cảnh báo page bị hạn chế, bài lỗi, page “im lặng”.
 7. **Kiểm tra nội dung từng page**: xem mọi bài đã đăng, chờ đăng, lỗi; kéo cả bài đăng tay ngoài app về để kiểm tra.
 8. **Nút dừng khẩn cấp** cho toàn bộ hệ thống và nút dừng cho từng page.
+9. **Thêm page** 3 cách: nhập từ Meta Business rồi phân ngành, thêm từng page, hoặc dán danh sách hàng loạt (`ID | Tên | Ngành hàng`).
+10. **Chi phí**: bảng ước tính chi phí AI + máy chủ theo số page, và chi phí AI thật đo từ số token Claude trả về.
 
-| Tổng quan | Duyệt bài |
+| Tổng quan | Ngành hàng |
 |---|---|
-| ![](docs/dashboard.png) | ![](docs/review.png) |
+| ![](docs/dashboard.png) | ![](docs/niches.png) |
+| **Thêm page** | **Duyệt bài** |
+| ![](docs/page_new.png) | ![](docs/review.png) |
 | **Danh sách page** | **Chi tiết một page** |
 | ![](docs/pages.png) | ![](docs/page.png) |
 
@@ -51,6 +56,21 @@ Tên trường API nằm gọn trong `app/services/shopee.py`; nếu Shopee đ�
 
 ### 3. Claude AI (viết bài)
 Dán `ANTHROPIC_API_KEY`. Nếu để trống, app dùng caption mẫu có sẵn.
+
+- `AI_MODEL`: mặc định `claude-opus-5` (viết hay nhất). Muốn tiết kiệm: `claude-sonnet-5` hoặc `claude-haiku-4-5`.
+- `AI_BATCH=1` (mặc định): bài cho ngày mai được viết qua **Message Batches API**, giảm 50% chi phí,
+  thường xong trong vòng 1 giờ, nên job `drafts` chạy từ sáng sớm là kịp.
+
+## Chi phí mỗi tháng (ước tính, 3 bài/page/ngày, dùng Batch API)
+
+| Model | 80 page | 100 page | 250 page | 500 page |
+|---|---|---|---|---|
+| Claude Opus 5 | ~2,8 triệu đ | ~3,4 triệu đ | ~8,5 triệu đ | ~17 triệu đ |
+| Claude Sonnet 5 | ~1,2 triệu đ | ~1,5 triệu đ | ~3,6 triệu đ | ~7,2 triệu đ |
+| Claude Haiku 4.5 | ~0,4 triệu đ | ~0,5 triệu đ | ~1,1 triệu đ | ~2,2 triệu đ |
+
+Đã gồm máy chủ VPS (6–24 USD). Facebook và Shopee API miễn phí. Bảng chi tiết theo số page thật nằm trong **Cài đặt → Chi phí**;
+sau khi chạy thật, app hiển thị chi phí AI thật đo từ số token.
 
 ### 4. Chạy tự động (cron trên VPS)
 

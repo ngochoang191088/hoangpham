@@ -5,14 +5,16 @@
   <div>
     <a class="small" href="/pages">← Tất cả page</a>
     <h1 style="margin:4px 0">{{ page.name }}
-      <span class="pill {{ page.status }}">{{ {'active':'Hoạt động','paused':'Tạm dừng','restricted':'Bị hạn chế'}[page.status] }}</span>
-      <span class="pill niche">{{ page.niche }}</span></h1>
+      <span class="pill {{ page.status }}">{{ {'active':'Hoạt động','paused':'Tạm dừng','restricted':'Bị hạn chế','archived':'Đã gỡ'}[page.status] }}</span>
+      {% if page.niche %}<a class="pill niche" href="/pages?niche={{ page.niche | urlencode }}">{{ page.niche }}</a>{% else %}<span class="pill pending">Chưa phân ngành</span>{% endif %}</h1>
     <a class="small" href="https://www.facebook.com/{{ page.id }}" target="_blank" rel="noopener">Mở page trên Facebook ↗</a>
   </div>
   <div class="row">
     <form class="inline" method="post" action="/pages/{{ page.id }}/import"><button>⟳ Kéo bài từ Facebook</button></form>
-    {% if page.status != 'restricted' %}<form class="inline" method="post" action="/pages/{{ page.id }}/toggle">
+    {% if page.status in ('active', 'paused') %}<form class="inline" method="post" action="/pages/{{ page.id }}/toggle">
       <button class="{{ 'danger' if page.status == 'active' else 'ok' }}">{{ 'Tạm dừng page' if page.status == 'active' else '▶ Bật page' }}</button></form>{% endif %}
+    {% if page.status != 'archived' %}<form class="inline" method="post" action="/pages/{{ page.id }}/archive">
+      <button onclick="return confirm('Gỡ page này khỏi app? Lịch sử bài đăng vẫn được giữ.')">Gỡ khỏi app</button></form>{% endif %}
   </div>
 </div>
 
@@ -28,14 +30,14 @@
   <div class="card">
     <h2>Cài đặt page</h2>
     <form method="post" action="/pages/{{ page.id }}" class="form-grid" style="grid-template-columns:1fr">
-      <label>Ngách<select name="niche">{% for n in niches %}<option {{ 'selected' if n == page.niche }}>{{ n }}</option>{% endfor %}</select></label>
+      <label>Ngành hàng<select name="niche"><option value="">(Chưa phân ngành)</option>{% for n in niches %}<option {{ 'selected' if n == page.niche }}>{{ n }}</option>{% endfor %}</select></label>
       <label>Giọng văn (AI dùng khi viết bài)<input name="tone" value="{{ page.tone }}"></label>
       <label>Số bài mỗi ngày<input type="number" name="posts_per_day" min="0" max="20" value="{{ page.posts_per_day }}"></label>
       <label>Vị trí link<select name="link_mode">
         <option value="comment" {{ 'selected' if page.link_mode == 'comment' }}>Trong bình luận đầu tiên</option>
         <option value="post" {{ 'selected' if page.link_mode == 'post' }}>Trong nội dung bài</option></select></label>
       <label>Trạng thái<select name="status_">
-        {% for k, v in {'active':'Hoạt động','paused':'Tạm dừng','restricted':'Bị hạn chế'}.items() %}<option value="{{ k }}" {{ 'selected' if k == page.status }}>{{ v }}</option>{% endfor %}</select></label>
+        {% for k, v in {'active':'Hoạt động','paused':'Tạm dừng','restricted':'Bị hạn chế','archived':'Đã gỡ'}.items() %}<option value="{{ k }}" {{ 'selected' if k == page.status }}>{{ v }}</option>{% endfor %}</select></label>
       <label class="row" style="flex-direction:row"><input type="checkbox" name="auto_approve" value="true" {{ 'checked' if page.auto_approve }}> Tự duyệt bài không bị gắn cờ</label>
       <button class="primary">Lưu</button>
     </form>

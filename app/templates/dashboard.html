@@ -33,7 +33,7 @@
   <div class="card">
     <h2>Top 10 page kiếm nhiều nhất</h2>
     <div class="table-wrap"><table>
-      <tr><th>Page</th><th>Ngách</th><th class="num">Bài</th><th class="num">Đơn</th><th class="num">Hoa hồng</th></tr>
+      <tr><th>Page</th><th>Ngành hàng</th><th class="num">Bài</th><th class="num">Đơn</th><th class="num">Hoa hồng</th></tr>
       {% for p in top_pages %}
       <tr><td><a href="/pages/{{ p.id }}">{{ p.name }}</a></td><td><span class="pill niche">{{ p.niche }}</span></td>
         <td class="num">{{ p.posts }}</td><td class="num">{{ p.orders }}</td><td class="num"><b>{{ p.commission | vnd }}</b></td></tr>
@@ -48,10 +48,10 @@
     </table></div>
   </div>
   <div class="card">
-    <h2>Theo ngách</h2>
+    <h2>Theo ngành hàng</h2>
     {% set maxc = (niches | map(attribute='commission') | max) or 1 %}
     <div class="table-wrap"><table>
-      <tr><th>Ngách</th><th class="num">Page</th><th class="num">Đơn</th><th class="num">Hoa hồng</th><th style="width:30%"></th></tr>
+      <tr><th>Ngành hàng</th><th class="num">Page</th><th class="num">Đơn</th><th class="num">Hoa hồng</th><th style="width:30%"></th></tr>
       {% for n in niches %}
       <tr><td><a href="/pages?niche={{ n.niche | urlencode }}">{{ n.niche }}</a></td><td class="num">{{ n.pages }}</td><td class="num">{{ n.orders }}</td>
         <td class="num">{{ n.commission | vnd }}</td><td><div class="bar"><span style="width: {{ (n.commission / maxc * 100) | round }}%"></span></div></td></tr>

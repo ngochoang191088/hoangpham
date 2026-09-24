@@ -29,6 +29,11 @@ SHOPEE_APP_SECRET = os.getenv("SHOPEE_APP_SECRET", "")
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 AI_MODEL = os.getenv("AI_MODEL", "claude-opus-5")
+AI_EFFORT = os.getenv("AI_EFFORT", "medium")
+# Từ AI_BATCH_MIN bài trở lên thì dùng Message Batches API (giảm 50% chi phí)
+AI_BATCH = os.getenv("AI_BATCH", "1") == "1"
+AI_BATCH_MIN = int(os.getenv("AI_BATCH_MIN", "20"))
+USD_VND = float(os.getenv("USD_VND", "26000"))
 
 DB_PATH = os.getenv("DB_PATH", "data/app.db")
 TZ = ZoneInfo(os.getenv("TIMEZONE", "Asia/Ho_Chi_Minh"))

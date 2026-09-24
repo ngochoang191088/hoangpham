@@ -17,7 +17,7 @@
       </div>
       <div class="form-grid" style="margin-top:12px">
         <label>Từ cấm (mỗi dòng một từ): sản phẩm/bài chứa từ này bị chặn hoặc gắn cờ<textarea name="blacklist">{{ s.blacklist | join('\n') }}</textarea></label>
-        <label>Ngách và từ khoá săn sản phẩm (JSON)<textarea name="niches" style="font-family:monospace;font-size:12px">{{ s.niches | tojson(indent=2) }}</textarea></label>
+        <div class="small muted">Ngành hàng và từ khoá săn sản phẩm được quản lý ở trang <a href="/niches">Ngành hàng</a>.</div>
       </div>
       <p><button class="primary">Lưu cài đặt</button></p>
     </form>
@@ -27,7 +27,7 @@
     <p class="muted small">Bình thường các việc này chạy tự động bằng cron (xem README). Bấm để chạy ngay.</p>
     {% for key, label, note in [
       ('pages', 'Đồng bộ page từ Meta', 'Lấy danh sách page + token'),
-      ('hunt', 'Săn sản phẩm', 'Tìm sản phẩm hoa hồng cao theo ngách'),
+      ('hunt', 'Săn sản phẩm', 'Tìm sản phẩm hoa hồng cao theo ngành hàng'),
       ('drafts', 'Tạo bài nháp ngày mai', 'AI viết bài cho mọi page'),
       ('publish', 'Đăng bài đến giờ', 'Đăng các bài đã duyệt'),
       ('sync', 'Cập nhật số liệu', 'Tương tác Facebook + hoa hồng Shopee')] %}
@@ -43,6 +43,33 @@
     </table>
   </div>
 </div>
+<div class="card" style="margin-top:16px" id="chi-phi">
+  <h2>Chi phí vận hành ước tính mỗi tháng</h2>
+  <p class="muted small">
+    Tính với {{ "%.1f" | format(posts_per_day) }} bài/page/ngày (trung bình hiện tại), AI viết bài qua Batch API (giảm 50%),
+    tỷ giá {{ config.USD_VND | num }}đ/USD. Chi phí gồm tiền AI + máy chủ VPS.
+    Facebook Graph API và Shopee Affiliate API <b>miễn phí</b>.
+  </p>
+  <div class="table-wrap"><table>
+    <tr><th>Model AI viết bài</th><th class="num">≈ / bài</th>
+      {% for r in cost[0].rows %}<th class="num">{{ r.pages }} page<div class="small muted">{{ r.captions | num }} bài/tháng</div></th>{% endfor %}</tr>
+    {% for c in cost %}
+    <tr style="{{ 'background: var(--accent-soft)' if c.current }}">
+      <td><b>{{ c.label }}</b>{% if c.current %} <span class="pill niche">đang dùng</span>{% endif %}</td>
+      <td class="num">{{ ((c.per_caption_vnd / 10) | round * 10) | vnd }}</td>
+      {% for r in c.rows %}<td class="num"><b>{{ ((r.total_vnd / 1000) | round * 1000) | vnd }}</b><div class="small muted">AI ${{ "%.0f" | format(r.ai_usd) }} + VPS ${{ r.vps_usd | int }}</div></td>{% endfor %}
+    </tr>
+    {% endfor %}
+  </table></div>
+  <p class="small muted">Đây là ước tính: một bài giả định khoảng 600 token đầu vào và 1.000 token đầu ra (Haiku: 400).
+    Sau khi chạy thật, số liệu thật sẽ hiện ngay bên dưới. Đổi model bằng biến AI_MODEL trong file .env.</p>
+  <div class="alert {{ 'ok' if actual.calls else 'warn' }}">
+    {% if actual.calls %}Chi phí AI thật tháng này: <b>{{ actual.vnd | vnd }}</b> cho {{ actual.calls | num }} bài
+      (≈ {{ (actual.per_caption_usd * config.USD_VND) | vnd }}/bài).
+    {% else %}Chưa có số liệu chi phí thật (chưa gọi Claude API tháng này).{% endif %}
+  </div>
+</div>
+
 <div class="card" style="margin-top:16px">
   <h2>Nhật ký hệ thống</h2>
   <div class="table-wrap"><table>

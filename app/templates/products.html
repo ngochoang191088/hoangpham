@@ -4,13 +4,13 @@
 <h1>Kho sản phẩm hoa hồng cao</h1>
 <form class="filters" method="get">
   <input name="q" value="{{ q }}" placeholder="Tìm sản phẩm…">
-  <select name="niche"><option value="">Mọi ngách</option>{% for n in niches %}<option {{ 'selected' if n == niche }}>{{ n }}</option>{% endfor %}</select>
+  <select name="niche"><option value="">Mọi ngành hàng</option>{% for n in niches %}<option {{ 'selected' if n == niche }}>{{ n }}</option>{% endfor %}</select>
   <button>Lọc</button>
 </form>
 <p class="muted small">Điểm = hoa hồng kỳ vọng mỗi đơn × độ tin cậy (lượt bán, đánh giá). AI ưu tiên sản phẩm điểm cao. Bấm “Chặn” để AI không dùng sản phẩm đó nữa.</p>
 <div class="card table-wrap">
 <table>
-  <tr><th></th><th>Sản phẩm</th><th>Ngách</th><th class="num">Giá</th><th class="num">% HH</th><th class="num">HH/đơn</th>
+  <tr><th></th><th>Sản phẩm</th><th>Ngành hàng</th><th class="num">Giá</th><th class="num">% HH</th><th class="num">HH/đơn</th>
     <th class="num">Đã bán</th><th class="num">⭐</th><th class="num">Điểm</th><th class="num">Đã đăng</th><th class="num">Đã kiếm</th><th></th></tr>
   {% for p in rows %}
   <tr style="{{ 'opacity:.5' if p.blocked }}">
