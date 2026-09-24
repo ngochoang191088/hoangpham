@@ -69,7 +69,7 @@ Chạy tay:
 Chưa cần Facebook App: app giả lập 1 tài khoản có 82 page, sản phẩm, video và 30 ngày số liệu.
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 cp .env.example .env          # đổi ADMIN_PASSWORD, SECRET_KEY
 python -m app.demo            # tạo dữ liệu mẫu
 uvicorn app.main:app --port 8000
