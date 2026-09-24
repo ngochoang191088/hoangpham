@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Bài đăng{% endblock %}
+{% block content %}
+<h1>Kiểm tra nội dung bài đăng</h1>
+<div class="tabs">
+  {% for k, v in {'published':'Đã đăng','approved':'Đã duyệt, chờ giờ','pending':'Chờ duyệt','failed':'Lỗi','rejected':'Từ chối'}.items() %}
+    <a class="{{ 'on' if status == k }}" href="?status={{ k }}&page_id={{ page_id }}&niche={{ niche | urlencode }}">{{ v }}</a>
+  {% endfor %}
+</div>
+<form class="filters" method="get">
+  <input type="hidden" name="status" value="{{ status }}">
+  <select name="page_id"><option value="">Mọi page</option>{% for pg in pages %}<option value="{{ pg.id }}" {{ 'selected' if pg.id == page_id }}>{{ pg.name }}</option>{% endfor %}</select>
+  <select name="niche"><option value="">Mọi ngách</option>{% for n in niches %}<option {{ 'selected' if n == niche }}>{{ n }}</option>{% endfor %}</select>
+  <input type="date" name="day" value="{{ day }}">
+  <input name="q" value="{{ q }}" placeholder="Tìm trong nội dung…">
+  <label class="row small"><input type="checkbox" name="flagged" value="1" {{ 'checked' if flagged }}> Chỉ bài bị gắn cờ</label>
+  <button>Lọc</button>
+</form>
+<div class="card">
+  <div class="muted small">{{ total | num }} bài</div>
+  {% for r in rows %}{% set show_page = True %}{% include "_post.html" %}
+  {% else %}<p class="muted">Không có bài nào.</p>{% endfor %}
+  {% set qs = 'status=' ~ status ~ '&page_id=' ~ page_id ~ '&niche=' ~ (niche | urlencode) ~ '&q=' ~ (q | urlencode) ~ '&day=' ~ day ~ '&flagged=' ~ flagged %}
+  <div class="pager">
+    {% if p > 1 %}<a class="btn" href="?{{ qs }}&p={{ p - 1 }}">← Trước</a>{% endif %}
+    <span class="muted small">Trang {{ p }} / {{ ((total + per - 1) // per) or 1 }}</span>
+    {% if p * per < total %}<a class="btn" href="?{{ qs }}&p={{ p + 1 }}">Sau →</a>{% endif %}
+  </div>
+</div>
+{% endblock %}

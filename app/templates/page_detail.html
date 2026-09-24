@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}{{ page.name }}{% endblock %}
+{% block content %}
+<div class="row" style="justify-content: space-between; margin-bottom: 12px">
+  <div>
+    <a class="small" href="/pages">← Tất cả page</a>
+    <h1 style="margin:4px 0">{{ page.name }}
+      <span class="pill {{ page.status }}">{{ {'active':'Hoạt động','paused':'Tạm dừng','restricted':'Bị hạn chế'}[page.status] }}</span>
+      <span class="pill niche">{{ page.niche }}</span></h1>
+    <a class="small" href="https://www.facebook.com/{{ page.id }}" target="_blank" rel="noopener">Mở page trên Facebook ↗</a>
+  </div>
+  <div class="row">
+    <form class="inline" method="post" action="/pages/{{ page.id }}/import"><button>⟳ Kéo bài từ Facebook</button></form>
+    {% if page.status != 'restricted' %}<form class="inline" method="post" action="/pages/{{ page.id }}/toggle">
+      <button class="{{ 'danger' if page.status == 'active' else 'ok' }}">{{ 'Tạm dừng page' if page.status == 'active' else '▶ Bật page' }}</button></form>{% endif %}
+  </div>
+</div>
+
+<div class="grid kpis">
+  <div class="card kpi"><div class="label">Hoa hồng {{ days }} ngày</div><div class="value">{{ stats.commission | vnd }}</div></div>
+  <div class="card kpi"><div class="label">Đơn</div><div class="value">{{ stats.orders }}</div></div>
+  <div class="card kpi"><div class="label">Bài đã đăng</div><div class="value">{{ stats.posts }}</div></div>
+  <div class="card kpi"><div class="label">Reaction</div><div class="value">{{ stats.reactions | num }}</div><div class="sub">{{ stats.comments | num }} bình luận · {{ stats.shares | num }} chia sẻ</div></div>
+</div>
+
+<div class="grid two" style="margin-bottom:16px">
+  <div class="card"><h2>Hoa hồng theo ngày</h2><div class="chart-box"><canvas id="daily"></canvas></div></div>
+  <div class="card">
+    <h2>Cài đặt page</h2>
+    <form method="post" action="/pages/{{ page.id }}" class="form-grid" style="grid-template-columns:1fr">
+      <label>Ngách<select name="niche">{% for n in niches %}<option {{ 'selected' if n == page.niche }}>{{ n }}</option>{% endfor %}</select></label>
+      <label>Giọng văn (AI dùng khi viết bài)<input name="tone" value="{{ page.tone }}"></label>
+      <label>Số bài mỗi ngày<input type="number" name="posts_per_day" min="0" max="20" value="{{ page.posts_per_day }}"></label>
+      <label>Vị trí link<select name="link_mode">
+        <option value="comment" {{ 'selected' if page.link_mode == 'comment' }}>Trong bình luận đầu tiên</option>
+        <option value="post" {{ 'selected' if page.link_mode == 'post' }}>Trong nội dung bài</option></select></label>
+      <label>Trạng thái<select name="status_">
+        {% for k, v in {'active':'Hoạt động','paused':'Tạm dừng','restricted':'Bị hạn chế'}.items() %}<option value="{{ k }}" {{ 'selected' if k == page.status }}>{{ v }}</option>{% endfor %}</select></label>
+      <label class="row" style="flex-direction:row"><input type="checkbox" name="auto_approve" value="true" {{ 'checked' if page.auto_approve }}> Tự duyệt bài không bị gắn cờ</label>
+      <button class="primary">Lưu</button>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="tabs">
+    {% for k, v in {'published':'Đã đăng','approved':'Đã duyệt, chờ giờ','pending':'Chờ duyệt','failed':'Lỗi','rejected':'Từ chối'}.items() %}
+      <a class="{{ 'on' if status_ == k }}" href="?status_={{ k }}">{{ v }} ({{ counts.get(k, 0) }})</a>
+    {% endfor %}
+  </div>
+  {% for r in posts %}{% set show_page = False %}{% include "_post.html" %}
+  {% else %}<p class="muted">Không có bài nào.</p>{% endfor %}
+  {% if counts.get(status_, 0) > posts | length %}
+    <p><a class="btn" href="/posts?status={{ status_ }}&page_id={{ page.id }}">Xem tất cả {{ counts.get(status_, 0) }} bài →</a></p>
+  {% endif %}
+</div>
+
+{% if activity %}
+<div class="card" style="margin-top:16px">
+  <h2>Nhật ký page</h2>
+  <table>{% for a in activity %}<tr><td class="small muted">{{ a.ts[:16].replace('T',' ') }}</td><td>{{ a.message }}</td></tr>{% endfor %}</table>
+</div>
+{% endif %}
+
+<script>
+const css = getComputedStyle(document.documentElement);
+const c = n => css.getPropertyValue(n).trim();
+const data = {{ chart | tojson }};
+new Chart(document.getElementById('daily'), {
+  type: 'bar',
+  data: { labels: data.labels, datasets: [{ label: 'Hoa hồng (đ)', data: data.commission, backgroundColor: c('--accent'), borderRadius: 3 }] },
+  options: { maintainAspectRatio: false, plugins: { legend: { display: false } },
+    scales: { x: { ticks: { color: c('--muted') }, grid: { display: false } },
+              y: { ticks: { color: c('--muted'), callback: v => (v/1000).toLocaleString('vi-VN') + 'k' }, grid: { color: c('--line') } } } }
+});
+</script>
+{% endblock %}

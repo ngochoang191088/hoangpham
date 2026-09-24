@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Tổng quan{% endblock %} · Quản lý Page</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="/static/chart.umd.js"></script>
+</head>
+<body>
+{% if config.DEMO_MODE %}<div class="banner demo">CHẾ ĐỘ DEMO: dữ liệu mẫu, chưa đăng thật lên Facebook. Điền token trong file .env để chạy thật.</div>{% endif %}
+{% if global_pause %}<div class="banner pause">ĐANG DỪNG KHẨN CẤP: không page nào được đăng bài.</div>{% endif %}
+<header>
+  <nav class="nav">
+    <span class="brand">🛒 Aff Pages</span>
+    {% set path = request.url.path %}
+    <a class="item {{ 'on' if path == '/' }}" href="/">Tổng quan</a>
+    <a class="item {{ 'on' if path.startswith('/pages') }}" href="/pages">Page</a>
+    <a class="item {{ 'on' if path.startswith('/review') }}" href="/review">Duyệt bài {% if pending_count %}<span class="badge">{{ pending_count }}</span>{% endif %}</a>
+    <a class="item {{ 'on' if path.startswith('/posts') }}" href="/posts">Bài đăng</a>
+    <a class="item {{ 'on' if path.startswith('/products') }}" href="/products">Sản phẩm</a>
+    <a class="item {{ 'on' if path.startswith('/settings') }}" href="/settings">Cài đặt</a>
+    <span class="spacer"></span>
+    <form class="inline" method="post" action="/pause">
+      {% if global_pause %}<button class="ok">▶ Bật lại đăng bài</button>
+      {% else %}<button class="danger" onclick="return confirm('Dừng đăng bài trên TẤT CẢ page?')">Dừng khẩn cấp</button>{% endif %}
+    </form>
+  </nav>
+</header>
+<main>{% block content %}{% endblock %}</main>
+</body>
+</html>

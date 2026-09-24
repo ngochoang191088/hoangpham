@@ -1,0 +1,44 @@
+{# Một bài đăng. Cần biến: r (post), show_page (bool) #}
+<div class="post">
+  {% if r.image_url %}<img src="{{ r.image_url }}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">{% else %}<div></div>{% endif %}
+  <div>
+    <div class="row">
+      <span class="pill {{ r.status }}">{{ {'published':'Đã đăng','pending':'Chờ duyệt','approved':'Đã duyệt','rejected':'Từ chối','failed':'Lỗi'}[r.status] }}</span>
+      {% if show_page %}<a href="/pages/{{ r.page_id }}"><b>{{ r.page_name }}</b></a>{% endif %}
+      {% if r.source == 'facebook' %}<span class="pill niche">Đăng ngoài app</span>{% endif %}
+      <span class="muted small">
+        {% if r.published_at %}Đăng lúc {{ r.published_at[:16].replace('T',' ') }}{% elif r.scheduled_at %}Lịch đăng {{ r.scheduled_at[:16].replace('T',' ') }}{% endif %}
+      </span>
+    </div>
+    {% if r.product_name %}<div class="small muted">Sản phẩm: {{ r.product_name }}</div>{% endif %}
+    {% set flags = r.flags | loads %}
+    {% for f in flags %}<div class="flag">⚠ {{ f }}</div>{% endfor %}
+    {% if r.status in ('pending', 'approved') %}
+      <form method="post" action="/posts/{{ r.id }}/edit">
+        <textarea name="caption">{{ r.caption }}</textarea>
+        <div class="actions"><button>Lưu nội dung</button>
+    {% else %}
+      <div class="caption">{{ r.caption }}</div>
+      <div class="actions">
+    {% endif %}
+        {% if r.aff_link %}<a class="small" href="{{ r.aff_link }}" target="_blank" rel="noopener">🔗 Link aff</a>{% endif %}
+        {% if r.permalink %}<a class="small" href="{{ r.permalink }}" target="_blank" rel="noopener">Xem trên Facebook ↗</a>{% endif %}
+    {% if r.status in ('pending', 'approved') %}</div></form><div class="actions">{% endif %}
+        {% if r.status == 'pending' %}
+          <form class="inline" method="post" action="/posts/{{ r.id }}/approve"><button class="ok">✓ Duyệt</button></form>
+          <form class="inline" method="post" action="/posts/{{ r.id }}/reject"><button>✕ Từ chối</button></form>
+        {% elif r.status == 'approved' %}
+          <form class="inline" method="post" action="/posts/{{ r.id }}/unapprove"><button>↩ Bỏ duyệt</button></form>
+        {% elif r.status == 'failed' %}
+          <form class="inline" method="post" action="/posts/{{ r.id }}/retry"><button>↻ Thử đăng lại</button></form>
+        {% endif %}
+      </div>
+    {% if r.error %}<div class="flag">Lỗi: {{ r.error }}</div>{% endif %}
+    {% if r.status == 'published' %}
+      <div class="meta">
+        <span>👍 {{ r.reactions | num }}</span><span>💬 {{ r.comments | num }}</span><span>↗ {{ r.shares | num }}</span>
+        <span>🛒 {{ r.orders }} đơn</span><span><b>💰 {{ r.commission | vnd }}</b></span>
+      </div>
+    {% endif %}
+  </div>
+</div>

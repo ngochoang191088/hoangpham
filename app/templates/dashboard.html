@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row" style="justify-content: space-between; margin-bottom: 12px">
+  <h1 style="margin:0">Tổng quan {{ kpi.pages }} page</h1>
+  <div class="tabs" style="margin:0; border:none">
+    {% for d in (7, 30, 90) %}<a class="{{ 'on' if days == d }}" href="/?days={{ d }}">{{ d }} ngày</a>{% endfor %}
+  </div>
+</div>
+
+<div class="grid kpis">
+  <div class="card kpi"><div class="label">Hoa hồng {{ days }} ngày</div><div class="value">{{ kpi.commission | vnd }}</div><div class="sub">Hôm nay: {{ kpi.commission_today | vnd }}</div></div>
+  <div class="card kpi"><div class="label">Đơn hàng</div><div class="value">{{ kpi.orders | num }}</div><div class="sub">TB {{ (kpi.commission / kpi.orders if kpi.orders else 0) | vnd }}/đơn</div></div>
+  <div class="card kpi"><div class="label">Bài đã đăng</div><div class="value">{{ kpi.posts | num }}</div><div class="sub">Hôm nay: {{ kpi.published_today }} đã đăng · {{ kpi.scheduled_today }} chờ giờ</div></div>
+  <div class="card kpi"><div class="label">Tương tác</div><div class="value">{{ kpi.reactions | num }}</div><div class="sub">Reaction + bình luận + chia sẻ</div></div>
+  <div class="card kpi"><div class="label">Page</div><div class="value">{{ kpi.active }}<span class="muted" style="font-size:14px"> / {{ kpi.pages }} hoạt động</span></div>
+    <div class="sub">{{ kpi.restricted }} bị hạn chế · {{ kpi.paused }} tạm dừng</div></div>
+  <div class="card kpi"><div class="label">Chờ duyệt</div><div class="value"><a href="/review">{{ pending_count }}</a></div><div class="sub">{{ kpi.failed }} bài lỗi trong 48h</div></div>
+</div>
+
+<div class="grid two" style="margin-bottom:16px">
+  <div class="card">
+    <h2>Hoa hồng & số bài mỗi ngày</h2>
+    <div class="chart-box"><canvas id="daily"></canvas></div>
+  </div>
+  <div class="card">
+    <h2>Cần chú ý</h2>
+    {% for level, msg, link in alerts %}<a class="alert {{ level }}" href="{{ link }}">{{ msg }}</a>
+    {% else %}<div class="alert ok">Mọi thứ đang ổn ✓</div>{% endfor %}
+  </div>
+</div>
+
+<div class="grid half" style="margin-bottom:16px">
+  <div class="card">
+    <h2>Top 10 page kiếm nhiều nhất</h2>
+    <div class="table-wrap"><table>
+      <tr><th>Page</th><th>Ngách</th><th class="num">Bài</th><th class="num">Đơn</th><th class="num">Hoa hồng</th></tr>
+      {% for p in top_pages %}
+      <tr><td><a href="/pages/{{ p.id }}">{{ p.name }}</a></td><td><span class="pill niche">{{ p.niche }}</span></td>
+        <td class="num">{{ p.posts }}</td><td class="num">{{ p.orders }}</td><td class="num"><b>{{ p.commission | vnd }}</b></td></tr>
+      {% endfor %}
+    </table></div>
+    <h2 style="margin-top:20px">5 page yếu nhất (đang hoạt động)</h2>
+    <div class="table-wrap"><table>
+      {% for p in weak_pages %}
+      <tr><td><a href="/pages/{{ p.id }}">{{ p.name }}</a></td><td><span class="pill niche">{{ p.niche }}</span></td>
+        <td class="num">{{ p.posts }} bài</td><td class="num">{{ p.commission | vnd }}</td></tr>
+      {% endfor %}
+    </table></div>
+  </div>
+  <div class="card">
+    <h2>Theo ngách</h2>
+    {% set maxc = (niches | map(attribute='commission') | max) or 1 %}
+    <div class="table-wrap"><table>
+      <tr><th>Ngách</th><th class="num">Page</th><th class="num">Đơn</th><th class="num">Hoa hồng</th><th style="width:30%"></th></tr>
+      {% for n in niches %}
+      <tr><td><a href="/pages?niche={{ n.niche | urlencode }}">{{ n.niche }}</a></td><td class="num">{{ n.pages }}</td><td class="num">{{ n.orders }}</td>
+        <td class="num">{{ n.commission | vnd }}</td><td><div class="bar"><span style="width: {{ (n.commission / maxc * 100) | round }}%"></span></div></td></tr>
+      {% endfor %}
+    </table></div>
+    <h2 style="margin-top:20px">Sản phẩm ra tiền nhất</h2>
+    <div class="table-wrap"><table>
+      <tr><th>Sản phẩm</th><th class="num">% HH</th><th class="num">Page</th><th class="num">Đơn</th><th class="num">Hoa hồng</th></tr>
+      {% for p in top_products %}
+      <tr><td>{{ p.name }}</td><td class="num">{{ (p.commission_rate * 100) | round(1) }}%</td><td class="num">{{ p.pages }}</td>
+        <td class="num">{{ p.orders }}</td><td class="num">{{ p.commission | vnd }}</td></tr>
+      {% endfor %}
+    </table></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Hoạt động gần đây</h2>
+  <div class="table-wrap"><table>
+    {% for a in activity %}
+    <tr><td class="small muted" style="white-space:nowrap">{{ a.ts[:16].replace('T',' ') }}</td>
+      <td><span class="pill {{ {'error':'failed','warn':'pending','info':'published'}[a.level] }}">{{ a.level }}</span></td>
+      <td>{% if a.page_name %}<a href="/pages/{{ a.page_id }}">{{ a.page_name }}</a>: {% endif %}{{ a.message }}</td></tr>
+    {% endfor %}
+  </table></div>
+</div>
+
+<script>
+const css = getComputedStyle(document.documentElement);
+const c = n => css.getPropertyValue(n).trim();
+const data = {{ chart | tojson }};
+new Chart(document.getElementById('daily'), {
+  data: { labels: data.labels, datasets: [
+    { type: 'bar', label: 'Hoa hồng (đ)', data: data.commission, backgroundColor: c('--accent'), yAxisID: 'y', borderRadius: 3 },
+    { type: 'line', label: 'Số bài đăng', data: data.posts, borderColor: c('--blue'), backgroundColor: c('--blue'), yAxisID: 'y1', tension: .3, pointRadius: 0 },
+  ]},
+  options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+    plugins: { legend: { labels: { color: c('--muted') } } },
+    scales: {
+      x: { ticks: { color: c('--muted') }, grid: { display: false } },
+      y: { ticks: { color: c('--muted'), callback: v => (v/1000).toLocaleString('vi-VN') + 'k' }, grid: { color: c('--line') } },
+      y1: { position: 'right', ticks: { color: c('--muted') }, grid: { display: false } },
+    } }
+});
+</script>
+{% endblock %}

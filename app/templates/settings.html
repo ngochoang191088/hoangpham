@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Cài đặt{% endblock %}
+{% block content %}
+<h1>Cài đặt</h1>
+<div class="grid two">
+  <div class="card">
+    <h2>Quy tắc chung</h2>
+    <form method="post" action="/settings">
+      <div class="form-grid">
+        <label>Hoa hồng tối thiểu (%)<input type="number" step="0.5" name="min_commission_rate" value="{{ (s.min_commission_rate * 100) | round(1) }}"></label>
+        <label>Đánh giá tối thiểu (sao)<input type="number" step="0.1" name="min_rating" value="{{ s.min_rating }}"></label>
+        <label>Lượt bán tối thiểu<input type="number" name="min_sales" value="{{ s.min_sales }}"></label>
+        <label>Tối đa số page dùng 1 sản phẩm/ngày<input type="number" name="max_pages_per_product_per_day" value="{{ s.max_pages_per_product_per_day }}"></label>
+        <label>Không lặp sản phẩm trên 1 page trong (ngày)<input type="number" name="repeat_product_after_days" value="{{ s.repeat_product_after_days }}"></label>
+        <label>Khung giờ đăng (giờ, cách nhau dấu phẩy)<input name="post_hours" value="{{ s.post_hours | join(', ') }}"></label>
+        <label>Ghi chú tiếp thị liên kết (thêm cuối mỗi bài)<input name="disclosure" value="{{ s.disclosure }}"></label>
+      </div>
+      <div class="form-grid" style="margin-top:12px">
+        <label>Từ cấm (mỗi dòng một từ): sản phẩm/bài chứa từ này bị chặn hoặc gắn cờ<textarea name="blacklist">{{ s.blacklist | join('\n') }}</textarea></label>
+        <label>Ngách và từ khoá săn sản phẩm (JSON)<textarea name="niches" style="font-family:monospace;font-size:12px">{{ s.niches | tojson(indent=2) }}</textarea></label>
+      </div>
+      <p><button class="primary">Lưu cài đặt</button></p>
+    </form>
+  </div>
+  <div class="card">
+    <h2>Chạy việc thủ công</h2>
+    <p class="muted small">Bình thường các việc này chạy tự động bằng cron (xem README). Bấm để chạy ngay.</p>
+    {% for key, label, note in [
+      ('pages', 'Đồng bộ page từ Meta', 'Lấy danh sách page + token'),
+      ('hunt', 'Săn sản phẩm', 'Tìm sản phẩm hoa hồng cao theo ngách'),
+      ('drafts', 'Tạo bài nháp ngày mai', 'AI viết bài cho mọi page'),
+      ('publish', 'Đăng bài đến giờ', 'Đăng các bài đã duyệt'),
+      ('sync', 'Cập nhật số liệu', 'Tương tác Facebook + hoa hồng Shopee')] %}
+      <form method="post" action="/jobs/{{ key }}" style="margin-bottom:8px" class="row">
+        <button style="min-width:190px">{{ label }}</button><span class="muted small">{{ note }}</span>
+      </form>
+    {% endfor %}
+    <h2 style="margin-top:20px">Kết nối</h2>
+    <table>
+      <tr><td>Facebook</td><td>{{ '✅ Đã kết nối' if config.FB_ENABLED else '⚪ DEMO' }}</td></tr>
+      <tr><td>Shopee Affiliate</td><td>{{ '✅ Đã kết nối' if config.SHOPEE_ENABLED else '⚪ DEMO' }}</td></tr>
+      <tr><td>Claude AI</td><td>{{ '✅ ' ~ config.AI_MODEL if config.AI_ENABLED else '⚪ Dùng mẫu có sẵn' }}</td></tr>
+    </table>
+  </div>
+</div>
+<div class="card" style="margin-top:16px">
+  <h2>Nhật ký hệ thống</h2>
+  <div class="table-wrap"><table>
+    {% for a in activity %}
+    <tr><td class="small muted" style="white-space:nowrap">{{ a.ts[:16].replace('T',' ') }}</td>
+      <td><span class="pill {{ {'error':'failed','warn':'pending','info':'published'}[a.level] }}">{{ a.level }}</span></td>
+      <td>{% if a.page_name %}<a href="/pages/{{ a.page_id }}">{{ a.page_name }}</a>: {% endif %}{{ a.message }}</td></tr>
+    {% endfor %}
+  </table></div>
+</div>
+{% endblock %}

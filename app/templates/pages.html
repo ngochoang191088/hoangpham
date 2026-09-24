@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Page{% endblock %}
+{% block content %}
+<h1>Tất cả page ({{ rows | length }})</h1>
+<form class="filters" method="get">
+  <input name="q" value="{{ q }}" placeholder="Tìm tên page…">
+  <select name="niche"><option value="">Mọi ngách</option>{% for n in niches %}<option {{ 'selected' if n == niche }}>{{ n }}</option>{% endfor %}</select>
+  <select name="status_">
+    <option value="">Mọi trạng thái</option>
+    {% for k, v in {'active':'Hoạt động','paused':'Tạm dừng','restricted':'Bị hạn chế'}.items() %}<option value="{{ k }}" {{ 'selected' if k == status_ }}>{{ v }}</option>{% endfor %}
+  </select>
+  <input type="hidden" name="sort" value="{{ sort }}">
+  <button>Lọc</button>
+</form>
+{% macro sortlink(key, label) %}<a href="?niche={{ niche | urlencode }}&status_={{ status_ }}&q={{ q | urlencode }}&sort={{ key }}">{{ label }}{{ ' ↓' if sort == key }}</a>{% endmacro %}
+<div class="card table-wrap">
+<table>
+  <tr><th>{{ sortlink('name', 'Page') }}</th><th>Ngách</th><th>Trạng thái</th><th class="num">Bài/ngày</th>
+    <th class="num">{{ sortlink('posts', 'Bài 30 ngày') }}</th><th class="num">{{ sortlink('engagement', 'Tương tác') }}</th>
+    <th class="num">{{ sortlink('orders', 'Đơn') }}</th><th class="num">{{ sortlink('commission', 'Hoa hồng') }}</th>
+    <th>{{ sortlink('last', 'Bài gần nhất') }}</th><th>Chờ duyệt / lỗi</th><th></th></tr>
+  {% for p in rows %}
+  <tr>
+    <td><a href="/pages/{{ p.id }}"><b>{{ p.name }}</b></a></td>
+    <td><span class="pill niche">{{ p.niche }}</span></td>
+    <td><span class="pill {{ p.status }}">{{ {'active':'Hoạt động','paused':'Tạm dừng','restricted':'Bị hạn chế'}[p.status] }}</span></td>
+    <td class="num">{{ p.posts_per_day }}</td>
+    <td class="num">{{ p.posts }}</td>
+    <td class="num">{{ p.engagement | num }}</td>
+    <td class="num">{{ p.orders }}</td>
+    <td class="num"><b>{{ p.commission | vnd }}</b></td>
+    <td class="small muted">{{ p.last_published[:16].replace('T',' ') if p.last_published else '—' }}</td>
+    <td>{% if p.pending %}<a href="/review?page_id={{ p.id }}">{{ p.pending }} chờ</a>{% endif %}
+        {% if p.failed %}<a class="flag" href="/posts?status=failed&page_id={{ p.id }}">{{ p.failed }} lỗi</a>{% endif %}</td>
+    <td>{% if p.status != 'restricted' %}<form class="inline" method="post" action="/pages/{{ p.id }}/toggle">
+      <button class="small">{{ 'Dừng' if p.status == 'active' else '▶ Bật' }}</button></form>{% endif %}</td>
+  </tr>
+  {% endfor %}
+</table>
+</div>
+{% endblock %}

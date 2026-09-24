@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Sản phẩm{% endblock %}
+{% block content %}
+<h1>Kho sản phẩm hoa hồng cao</h1>
+<form class="filters" method="get">
+  <input name="q" value="{{ q }}" placeholder="Tìm sản phẩm…">
+  <select name="niche"><option value="">Mọi ngách</option>{% for n in niches %}<option {{ 'selected' if n == niche }}>{{ n }}</option>{% endfor %}</select>
+  <button>Lọc</button>
+</form>
+<p class="muted small">Điểm = hoa hồng kỳ vọng mỗi đơn × độ tin cậy (lượt bán, đánh giá). AI ưu tiên sản phẩm điểm cao. Bấm “Chặn” để AI không dùng sản phẩm đó nữa.</p>
+<div class="card table-wrap">
+<table>
+  <tr><th></th><th>Sản phẩm</th><th>Ngách</th><th class="num">Giá</th><th class="num">% HH</th><th class="num">HH/đơn</th>
+    <th class="num">Đã bán</th><th class="num">⭐</th><th class="num">Điểm</th><th class="num">Đã đăng</th><th class="num">Đã kiếm</th><th></th></tr>
+  {% for p in rows %}
+  <tr style="{{ 'opacity:.5' if p.blocked }}">
+    <td><img src="{{ p.image_url }}" alt="" loading="lazy" style="width:44px;height:44px;object-fit:cover;border-radius:6px"></td>
+    <td><a href="{{ p.product_link }}" target="_blank" rel="noopener">{{ p.name }}</a><div class="small muted">{{ p.shop_name }}</div></td>
+    <td><span class="pill niche">{{ p.niche }}</span></td>
+    <td class="num">{{ p.price | vnd }}</td>
+    <td class="num"><b>{{ (p.commission_rate * 100) | round(1) }}%</b></td>
+    <td class="num">{{ (p.price * p.commission_rate) | vnd }}</td>
+    <td class="num">{{ p.sales | num }}</td>
+    <td class="num">{{ p.rating }}</td>
+    <td class="num">{{ p.score | num }}</td>
+    <td class="num">{{ p.used }}</td>
+    <td class="num">{{ p.earned | vnd }}</td>
+    <td><form class="inline" method="post" action="/products/{{ p.item_id }}/toggle"><button class="small">{{ 'Bỏ chặn' if p.blocked else 'Chặn' }}</button></form></td>
+  </tr>
+  {% else %}<tr><td colspan="12" class="muted">Chưa có sản phẩm. Vào Cài đặt → “Săn sản phẩm”.</td></tr>{% endfor %}
+</table>
+</div>
+{% endblock %}

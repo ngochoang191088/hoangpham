@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Duyệt bài{% endblock %}
+{% block content %}
+<div class="row" style="justify-content: space-between; margin-bottom: 12px">
+  <h1 style="margin:0">Duyệt bài <span class="muted" style="font-size:14px">(hiển thị {{ rows | length }} / {{ pending_count }})</span></h1>
+  <div class="row">
+    <a class="btn" href="/review{{ '' if flagged else '?flagged=1' }}">{{ 'Xem tất cả' if flagged else 'Chỉ bài bị gắn cờ' }}</a>
+    <form class="inline" method="post" action="/review/bulk">
+      <input type="hidden" name="action" value="approve_clean">
+      <button class="ok" {{ 'disabled' if not clean }}>✓ Duyệt tất cả {{ clean }} bài không bị gắn cờ</button>
+    </form>
+  </div>
+</div>
+<p class="muted">Bài bị gắn cờ ⚠ được đưa lên đầu. Sửa nội dung trực tiếp rồi bấm “Lưu nội dung”, hệ thống kiểm tra lại tự động.</p>
+
+<form id="bulk" method="post" action="/review/bulk"></form>
+<div class="card">
+  <div class="row" style="margin-bottom:8px">
+    <label class="row small"><input type="checkbox" onclick="document.querySelectorAll('.pick').forEach(c => c.checked = this.checked)"> Chọn tất cả</label>
+    <button form="bulk" name="action" value="approve" class="ok">Duyệt bài đã chọn</button>
+    <button form="bulk" name="action" value="reject">Từ chối bài đã chọn</button>
+  </div>
+  {% for r in rows %}
+    <div class="row small" style="margin-top:10px">
+      <input class="pick" type="checkbox" form="bulk" name="ids" value="{{ r.id }}">
+      <span class="pill niche">{{ r.niche }}</span>
+      {% if r.price %}<span class="muted">Giá {{ r.price | vnd }} · HH {{ (r.commission_rate * 100) | round(1) }}% ≈ {{ (r.price * r.commission_rate) | vnd }}/đơn · ⭐ {{ r.rating }} · đã bán {{ r.sales | num }}</span>{% endif %}
+    </div>
+    {% set show_page = True %}{% include "_post.html" %}
+  {% else %}<p class="muted">Không có bài nào chờ duyệt 🎉</p>{% endfor %}
+</div>
+{% endblock %}
