@@ -1,11 +1,11 @@
-"""Các việc tự động: săn sản phẩm, tạo bài nháp, đăng bài, đồng bộ số liệu.
+"""Các việc tự động: nhận diện page, tạo bài nháp, đăng bài (video / ảnh), đồng bộ số liệu.
 
 Chạy bằng cron (xem README) hoặc bấm nút trong trang Cài đặt.
 """
 import json
 from datetime import datetime, timedelta
 
-from app import db
+from app import config, db
 from app.services import ai_writer, facebook, shopee
 
 
@@ -84,9 +84,13 @@ def generate_drafts(conn, day: datetime | None = None) -> int:
             (page["id"], since),
         )}
         if page["niche"] not in candidates_by_niche:
+            # Sản phẩm bạn nhập cho ngành này, đủ tên + link aff (hoặc tự tạo link khi có Shopee Open API)
             candidates_by_niche[page["niche"]] = conn.execute(
-                "SELECT * FROM products WHERE niche = ? AND blocked = 0 ORDER BY score DESC LIMIT 200",
-                (page["niche"],),
+                """SELECT products.*, (SELECT COUNT(*) FROM videos WHERE videos.item_id = products.item_id) AS n_videos
+                   FROM products WHERE niche = ? AND blocked = 0 AND name != ''
+                     AND (aff_link != '' OR ?)
+                   ORDER BY n_videos > 0 DESC, score DESC, fetched_at DESC LIMIT 500""",
+                (page["niche"], int(config.SHOPEE_ENABLED)),
             ).fetchall()
         chosen = []
         for p in candidates_by_niche[page["niche"]]:
@@ -97,7 +101,7 @@ def generate_drafts(conn, day: datetime | None = None) -> int:
             if len(chosen) == need:
                 break
         if not chosen:
-            db.log(conn, "warn", "Không còn sản phẩm phù hợp để tạo bài", page["id"])
+            db.log(conn, "warn", f"Ngành “{page['niche']}” hết sản phẩm chưa đăng, hãy nhập thêm sản phẩm", page["id"])
             continue
         jobs += [(page, p, when) for p, when in zip(chosen, _slots(day, s["post_hours"], len(chosen), idx * 7))]
 
@@ -119,24 +123,40 @@ def generate_drafts(conn, day: datetime | None = None) -> int:
         flags = ai_writer.check_content(caption, s, day_captions.get(p["item_id"], []))
         day_captions.setdefault(p["item_id"], []).append(caption)
         status = "approved" if page["auto_approve"] and not flags else "pending"
+        video = pick_video(conn, p["item_id"], page["id"])
+        if not video and not p["image_url"]:
+            flags.append("Sản phẩm chưa có ảnh hoặc video")
         now = db.now_iso()
         cur = conn.execute(
-            """INSERT INTO posts(page_id, item_id, caption, image_url, status, flags, scheduled_at,
-                   created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (page["id"], p["item_id"], caption, p["image_url"], status,
-             json.dumps(flags, ensure_ascii=False), when.isoformat(), now, now),
+            """INSERT INTO posts(page_id, item_id, caption, image_url, media_type, video_id, status, flags,
+                   scheduled_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (page["id"], p["item_id"], caption, p["image_url"], "video" if video else "photo",
+             video["id"] if video else None, status, json.dumps(flags, ensure_ascii=False),
+             when.isoformat(), now, now),
         )
         post_id = cur.lastrowid
-        try:
-            link = shopee.make_link(p["offer_link"] or p["product_link"], page["id"], post_id)
-        except Exception as e:  # noqa: BLE001
-            link = ""
-            db.log(conn, "error", f"Không tạo được link aff cho bài #{post_id}: {e}", page["id"])
+        link = p["aff_link"]
+        if not link and config.SHOPEE_ENABLED:
+            try:
+                link = shopee.make_link(p["offer_link"] or p["product_link"], page["id"], post_id)
+            except Exception as e:  # noqa: BLE001
+                db.log(conn, "error", f"Không tạo được link aff cho bài #{post_id}: {e}", page["id"])
         conn.execute("UPDATE posts SET aff_link = ? WHERE id = ?", (link, post_id))
         created += 1
 
     db.log(conn, "info", f"Đã tạo {created} bài nháp cho ngày {day_str}")
     return created
+
+
+def pick_video(conn, item_id: str, page_id: str):
+    """Video của sản phẩm chưa từng đăng trên page này, ưu tiên video ít được dùng nhất."""
+    return conn.execute(
+        """SELECT videos.* FROM videos WHERE item_id = ?
+             AND id NOT IN (SELECT video_id FROM posts WHERE page_id = ? AND video_id IS NOT NULL
+                            AND status NOT IN ('rejected', 'failed'))
+           ORDER BY (SELECT COUNT(*) FROM posts WHERE posts.video_id = videos.id), id LIMIT 1""",
+        (item_id, page_id),
+    ).fetchone()
 
 
 def publish_due(conn) -> tuple[int, int]:
@@ -159,8 +179,11 @@ def publish_due(conn) -> tuple[int, int]:
             fail += 1
             continue
         page = {"id": r["page_id"], "access_token": r["access_token"], "link_mode": r["link_mode"]}
+        video = conn.execute("SELECT * FROM videos WHERE id = ?", (r["video_id"],)).fetchone() \
+            if r["media_type"] == "video" and r["video_id"] else None
         try:
-            res = facebook.publish(page, r["caption"], r["image_url"], r["aff_link"])
+            res = facebook.publish(page, r["caption"], r["aff_link"], r["image_url"],
+                                   dict(video) if video else None)
         except Exception as e:  # noqa: BLE001
             conn.execute("UPDATE posts SET status='failed', error=?, updated_at=? WHERE id=?",
                          (str(e)[:500], db.now_iso(), r["id"]))
@@ -213,17 +236,33 @@ def sync_metrics(conn, days: int = 7) -> int:
     return len(rows)
 
 
-def import_pages(conn) -> int:
-    """Nhập / cập nhật danh sách page (và page token) từ Meta Business."""
-    pages = facebook.list_managed_pages()
+def sync_pages(conn, user_token: str = "") -> dict:
+    """Nhận diện toàn bộ page của tài khoản Facebook đang đăng nhập.
+
+    Page mới: thêm vào app, chờ bạn chọn ngành hàng. Page cũ: cập nhật tên + token.
+    Page không còn quyền quản lý: chuyển sang "bị hạn chế" để ngừng đăng.
+    """
+    user_token = user_token or db.get_settings(conn).get("owner_token", "")
+    pages = facebook.list_managed_pages(user_token)
+    before = {r[0] for r in conn.execute("SELECT id FROM pages WHERE status != 'archived'")}
     for p in pages:
         conn.execute(
             """INSERT INTO pages(id, name, access_token, created_at) VALUES (?, ?, ?, ?)
                ON CONFLICT(id) DO UPDATE SET name = excluded.name, access_token = excluded.access_token""",
             (p["id"], p["name"], p.get("access_token", ""), db.now_iso()),
         )
-    db.log(conn, "info", f"Đồng bộ {len(pages)} page từ Meta Business (page mới cần được phân ngành hàng)")
-    return len(pages)
+    seen = {p["id"] for p in pages}
+    new = seen - before
+    lost = before - seen if pages else set()
+    for page_id in lost:
+        conn.execute("UPDATE pages SET status = 'restricted' WHERE id = ? AND status != 'archived'", (page_id,))
+        db.log(conn, "warn", "Tài khoản không còn quyền quản lý page này", page_id)
+    db.log(conn, "info", f"Nhận diện {len(pages)} page ({len(new)} page mới cần chọn ngành hàng)")
+    return {"total": len(pages), "new": len(new), "lost": len(lost)}
+
+
+def import_pages(conn) -> int:
+    return sync_pages(conn)["total"]
 
 
 def import_facebook_posts(conn, page_id: str) -> int:

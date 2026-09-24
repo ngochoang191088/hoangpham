@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Đăng nhập · Aff Pages</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<main style="max-width:440px; padding-top:10vh">
+  <div class="card" style="padding:28px">
+    <div class="brand" style="font-size:22px; padding:0">🛒 Aff Pages</div>
+    <p class="muted">Quản lý hàng trăm fanpage bán hàng affiliate Shopee: AI viết bài, tự đăng video / ảnh, báo cáo hoa hồng.</p>
+    {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+    {% if config.FB_LOGIN_ENABLED %}
+      <a class="btn primary" href="/auth/facebook" style="display:block; text-align:center; padding:12px; background:#1877f2; border-color:#1877f2">
+        Đăng nhập bằng Facebook</a>
+      <p class="small muted" style="margin-top:12px">Sau khi đăng nhập, app tự nhận diện tất cả page mà tài khoản Facebook của bạn đang quản lý.
+        Hãy tick chọn <b>tất cả page</b> khi Facebook hỏi quyền.</p>
+    {% else %}
+      <div class="alert warn small">Chưa cấu hình Facebook App (FB_APP_ID, FB_APP_SECRET) nên app đang chạy <b>bản DEMO</b> với page giả lập.</div>
+      <form method="post" action="/login" class="form-grid" style="grid-template-columns:1fr">
+        <label>Mật khẩu demo (ADMIN_PASSWORD trong file .env)<input type="password" name="password" autofocus required></label>
+        <button class="primary">Vào bản demo</button>
+      </form>
+    {% endif %}
+  </div>
+</main>
+</body>
+</html>

@@ -32,6 +32,9 @@ CREATE TABLE IF NOT EXISTS products (
     image_url TEXT NOT NULL DEFAULT '',
     product_link TEXT NOT NULL DEFAULT '',
     offer_link TEXT NOT NULL DEFAULT '',
+    aff_link TEXT NOT NULL DEFAULT '',        -- link aff do người dùng cung cấp
+    description TEXT NOT NULL DEFAULT '',     -- mô tả / điểm nổi bật để AI viết bài
+    source TEXT NOT NULL DEFAULT 'manual',    -- manual | file | shopee_api
     score REAL NOT NULL DEFAULT 0,
     blocked INTEGER NOT NULL DEFAULT 0,
     fetched_at TEXT NOT NULL
@@ -44,6 +47,8 @@ CREATE TABLE IF NOT EXISTS posts (
     source TEXT NOT NULL DEFAULT 'app',       -- app | facebook (đăng ngoài app)
     caption TEXT NOT NULL DEFAULT '',
     image_url TEXT NOT NULL DEFAULT '',
+    media_type TEXT NOT NULL DEFAULT 'photo', -- photo | video
+    video_id INTEGER,
     aff_link TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'pending',   -- pending | approved | rejected | published | failed
     flags TEXT NOT NULL DEFAULT '[]',         -- cảnh báo kiểm duyệt tự động (JSON)
@@ -63,6 +68,16 @@ CREATE TABLE IF NOT EXISTS posts (
 CREATE INDEX IF NOT EXISTS idx_posts_page ON posts(page_id, status);
 CREATE INDEX IF NOT EXISTS idx_posts_sched ON posts(status, scheduled_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_posts_fb ON posts(fb_post_id) WHERE fb_post_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS videos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id TEXT NOT NULL REFERENCES products(item_id) ON DELETE CASCADE,
+    url TEXT NOT NULL DEFAULT '',        -- link tải trực tiếp (.mp4) hoặc Google Drive
+    file_path TEXT NOT NULL DEFAULT '',  -- hoặc file đã tải lên app
+    title TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_videos_item ON videos(item_id);
 
 CREATE TABLE IF NOT EXISTS conversions (
     conversion_id TEXT PRIMARY KEY,
@@ -177,6 +192,7 @@ def get_conn():
 def init_db() -> None:
     with get_conn() as conn:
         conn.executescript(SCHEMA)
+        _migrate(conn)
         if not conn.execute("SELECT 1 FROM niches LIMIT 1").fetchone():
             for name, keywords in DEFAULT_NICHES.items():
                 conn.execute("INSERT INTO niches(name, keywords, created_at) VALUES (?, ?, ?)",
@@ -186,6 +202,22 @@ def init_db() -> None:
                 "INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)",
                 (key, json.dumps(value, ensure_ascii=False)),
             )
+
+
+# Cột thêm ở phiên bản sau: tự thêm vào DB cũ khi khởi động
+MIGRATIONS = {
+    "products": {"aff_link": "TEXT NOT NULL DEFAULT ''", "description": "TEXT NOT NULL DEFAULT ''",
+                 "source": "TEXT NOT NULL DEFAULT 'manual'"},
+    "posts": {"media_type": "TEXT NOT NULL DEFAULT 'photo'", "video_id": "INTEGER"},
+}
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    for table, cols in MIGRATIONS.items():
+        have = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+        for col, decl in cols.items():
+            if col not in have:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
 
 
 def get_settings(conn: sqlite3.Connection) -> dict:

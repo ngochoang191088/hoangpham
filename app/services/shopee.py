@@ -8,8 +8,10 @@ Khi chưa cấu hình AppID/Secret thì chạy DEMO với dữ liệu mẫu.
 import hashlib
 import json
 import random
+import re
 import time
 from datetime import datetime
+from urllib.parse import unquote
 
 import httpx
 
@@ -77,6 +79,47 @@ def search_products(keyword: str, limit: int = 20) -> list[dict]:
             "offer_link": n.get("offerLink") or "",
         })
     return result
+
+
+ITEM_QUERY = """
+query($shopId: Int64, $itemId: Int64) {
+  productOfferV2(shopId: $shopId, itemId: $itemId, page: 1, limit: 1) {
+    nodes {
+      itemId productName commissionRate priceMin sales ratingStar imageUrl shopName productLink offerLink
+    }
+  }
+}
+"""
+
+
+def name_from_link(link: str) -> str:
+    """Tên tạm lấy từ đường dẫn: shopee.vn/Noi-chien-5L-i.1.2 -> 'Noi chien 5L'."""
+    m = re.search(r"shopee\.vn/([^/?#]+?)-i\.\d+\.\d+", link or "")
+    return unquote(m.group(1)).replace("-", " ").strip() if m else ""
+
+
+def lookup_product(product_link: str) -> dict:
+    """Lấy tên, giá, ảnh, % hoa hồng từ link sản phẩm.
+
+    Cần Shopee Affiliate Open API; nếu chưa có thì chỉ lấy được tên tạm từ đường dẫn.
+    """
+    info = {"name": name_from_link(product_link)}
+    m = re.search(r"-i\.(\d+)\.(\d+)", product_link or "") or re.search(r"/product/(\d+)/(\d+)", product_link or "")
+    if not (config.SHOPEE_ENABLED and m):
+        return info
+    try:
+        nodes = _call(ITEM_QUERY, {"shopId": int(m.group(1)), "itemId": int(m.group(2))})["productOfferV2"]["nodes"]
+    except Exception:  # noqa: BLE001 - thiếu thông tin thì người dùng tự bổ sung
+        return info
+    if nodes:
+        n = nodes[0]
+        info.update({
+            "name": n["productName"], "price": float(n.get("priceMin") or 0),
+            "commission_rate": float(n.get("commissionRate") or 0), "sales": int(n.get("sales") or 0),
+            "rating": float(n.get("ratingStar") or 0), "shop_name": n.get("shopName") or "",
+            "image_url": n.get("imageUrl") or "",
+        })
+    return info
 
 
 LINK_MUTATION = """

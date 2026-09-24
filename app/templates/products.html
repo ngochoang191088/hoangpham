@@ -1,33 +1,125 @@
 {% extends "base.html" %}
-{% block title %}Sản phẩm{% endblock %}
+{% block title %}Sản phẩm & video{% endblock %}
 {% block content %}
-<h1>Kho sản phẩm hoa hồng cao</h1>
+<h1>Sản phẩm, link aff & video theo ngành hàng</h1>
+
+<div class="row" style="gap:6px; margin-bottom:16px">
+  <a class="pill {{ 'published' if not niche else '' }}" href="/products">Tất cả</a>
+  {% for n in niches %}
+    {% set c = counts.get(n, (0, 0)) %}
+    <a class="pill {{ 'published' if n == niche else ('failed' if not c[0] else 'niche') }}" href="/products?niche={{ n | urlencode }}">
+      {{ n }} · {{ c[0] }} SP{% if c[1] %} · 🎬 {{ c[1] | int }}{% endif %}</a>
+  {% endfor %}
+</div>
+
+<div class="grid half" style="margin-bottom:16px" id="nhap">
+  <div class="card">
+    <h2>1. Nhập file cho ngành hàng</h2>
+    <p class="muted small">Mỗi ngành hàng 1 file Excel riêng. Mỗi dòng: <b>Tên sản phẩm | Link sản phẩm | Link aff | Giá | Mô tả | Link ảnh | Link video</b>.
+      Bắt buộc có <b>Link aff</b>. Có <b>Link video</b> thì app đăng video; không có thì đăng ảnh sản phẩm.
+      Nhận file <b>.xlsx, .csv, .docx</b> (bảng hoặc danh sách link), <b>.txt</b>.</p>
+    <form method="post" action="/products/import" enctype="multipart/form-data" class="form-grid" style="grid-template-columns:1fr">
+      <label>Ngành hàng<select name="niche" required id="import-niche" onchange="document.getElementById('tpl').href='/products/template.xlsx?niche='+encodeURIComponent(this.value)">
+        <option value="">— chọn ngành hàng —</option>
+        {% for n in niches %}<option {{ 'selected' if n == niche }}>{{ n }}</option>{% endfor %}</select></label>
+      <label>File<input type="file" name="file" accept=".xlsx,.xlsm,.csv,.docx,.txt" required></label>
+      <div class="row"><button class="primary">Nhập file</button>
+        <a id="tpl" class="small" href="/products/template.xlsx?niche={{ niche | urlencode }}">⬇ Tải file Excel mẫu</a></div>
+    </form>
+  </div>
+  <div class="card">
+    <h2>2. Thêm 1 sản phẩm</h2>
+    <form method="post" action="/products/add" enctype="multipart/form-data" class="form-grid">
+      <label>Ngành hàng<select name="niche" required><option value="">— chọn —</option>
+        {% for n in niches %}<option {{ 'selected' if n == niche }}>{{ n }}</option>{% endfor %}</select></label>
+      <label>Link aff *<input name="aff_link" placeholder="https://s.shopee.vn/..." required></label>
+      <label>Link sản phẩm<input name="product_link" placeholder="https://shopee.vn/...-i.123.456"></label>
+      <label>Tên sản phẩm<input name="name" placeholder="Bỏ trống: lấy từ link"></label>
+      <label>Giá<input name="price" placeholder="199000 hoặc 199k"></label>
+      <label>Link ảnh<input name="image_url" placeholder="https://...jpg"></label>
+      <label style="grid-column: 1 / -1">Mô tả / điểm nổi bật (AI dựa vào đây để viết)<textarea name="description" style="min-height:60px"></textarea></label>
+      <label>Link video (.mp4 / Google Drive)<input name="video_url"></label>
+      <label>Hoặc tải video lên<input type="file" name="video_file" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.m4v,.webm"></label>
+      <div><button class="primary">Thêm sản phẩm</button></div>
+    </form>
+  </div>
+</div>
+
 <form class="filters" method="get">
-  <input name="q" value="{{ q }}" placeholder="Tìm sản phẩm…">
-  <select name="niche"><option value="">Mọi ngành hàng</option>{% for n in niches %}<option {{ 'selected' if n == niche }}>{{ n }}</option>{% endfor %}</select>
+  <input type="hidden" name="niche" value="{{ niche }}">
+  <input name="q" value="{{ q }}" placeholder="Tìm tên / link…">
+  <select name="only">
+    <option value="">Tất cả sản phẩm</option>
+    <option value="video" {{ 'selected' if only == 'video' }}>Có video</option>
+    <option value="novideo" {{ 'selected' if only == 'novideo' }}>Chưa có video (đăng ảnh)</option>
+    <option value="incomplete" {{ 'selected' if only == 'incomplete' }}>Thiếu thông tin</option>
+  </select>
   <button>Lọc</button>
+  <span class="muted small">{{ total | num }} sản phẩm{% if niche %} trong “{{ niche }}”{% endif %}</span>
 </form>
-<p class="muted small">Điểm = hoa hồng kỳ vọng mỗi đơn × độ tin cậy (lượt bán, đánh giá). AI ưu tiên sản phẩm điểm cao. Bấm “Chặn” để AI không dùng sản phẩm đó nữa.</p>
+
 <div class="card table-wrap">
 <table>
-  <tr><th></th><th>Sản phẩm</th><th>Ngành hàng</th><th class="num">Giá</th><th class="num">% HH</th><th class="num">HH/đơn</th>
-    <th class="num">Đã bán</th><th class="num">⭐</th><th class="num">Điểm</th><th class="num">Đã đăng</th><th class="num">Đã kiếm</th><th></th></tr>
+  <tr><th></th><th>Sản phẩm</th><th>Ngành hàng</th><th class="num">Giá</th><th>Link aff</th><th>Đăng bằng</th>
+    <th class="num">Đã đăng</th><th class="num">Hoa hồng</th><th></th></tr>
   {% for p in rows %}
+  {% set vids = videos.get(p.item_id, []) %}
   <tr style="{{ 'opacity:.5' if p.blocked }}">
-    <td><img src="{{ p.image_url }}" alt="" loading="lazy" style="width:44px;height:44px;object-fit:cover;border-radius:6px"></td>
-    <td><a href="{{ p.product_link }}" target="_blank" rel="noopener">{{ p.name }}</a><div class="small muted">{{ p.shop_name }}</div></td>
+    <td>{% if p.image_url %}<img src="{{ p.image_url }}" alt="" loading="lazy" onerror="this.style.visibility='hidden'" style="width:48px;height:48px;object-fit:cover;border-radius:6px">{% endif %}</td>
+    <td style="min-width:220px">
+      {% if p.name %}<b>{{ p.name }}</b>{% else %}<span class="flag">⚠ Chưa có tên</span>{% endif %}
+      {% if p.product_link %}<div class="small"><a href="{{ p.product_link }}" target="_blank" rel="noopener">Xem trên Shopee ↗</a></div>{% endif %}
+      {% if p.description %}<div class="small muted">{{ p.description[:90] }}{{ '…' if p.description | length > 90 }}</div>{% endif %}
+      {% if p.blocked %}<span class="pill failed">Đã chặn</span>{% endif %}
+    </td>
     <td><span class="pill niche">{{ p.niche }}</span></td>
-    <td class="num">{{ p.price | vnd }}</td>
-    <td class="num"><b>{{ (p.commission_rate * 100) | round(1) }}%</b></td>
-    <td class="num">{{ (p.price * p.commission_rate) | vnd }}</td>
-    <td class="num">{{ p.sales | num }}</td>
-    <td class="num">{{ p.rating }}</td>
-    <td class="num">{{ p.score | num }}</td>
+    <td class="num">{{ p.price | vnd if p.price else '—' }}</td>
+    <td class="small">{% if p.aff_link %}<a href="{{ p.aff_link }}" target="_blank" rel="noopener">{{ p.aff_link[:30] }}</a>{% else %}<span class="flag">thiếu</span>{% endif %}</td>
+    <td class="small" style="min-width:150px">
+      {% if vids %}<b>🎬 {{ vids | length }} video</b>
+        {% for v in vids %}<div class="row" style="gap:4px">
+          <span class="muted">{{ (v.title or v.url or v.file_path)[-28:] }}</span>
+          <form class="inline" method="post" action="/videos/{{ v.id }}/delete"><button class="small" style="padding:0 6px" title="Xoá video">✕</button></form>
+        </div>{% endfor %}
+      {% elif p.image_url %}🖼 Ảnh sản phẩm
+      {% else %}<span class="flag">⚠ Chưa có ảnh/video</span>{% endif %}
+    </td>
     <td class="num">{{ p.used }}</td>
     <td class="num">{{ p.earned | vnd }}</td>
-    <td><form class="inline" method="post" action="/products/{{ p.item_id }}/toggle"><button class="small">{{ 'Bỏ chặn' if p.blocked else 'Chặn' }}</button></form></td>
+    <td style="white-space:nowrap">
+      <details>
+        <summary class="btn small">Sửa / video</summary>
+        <div class="card" style="position:absolute; right:24px; width:min(440px, 90vw); z-index:20; box-shadow:0 8px 24px rgba(0,0,0,.15)">
+          <form method="post" action="/products/{{ p.item_id }}/edit" class="form-grid" style="grid-template-columns:1fr 1fr">
+            <label style="grid-column:1/-1">Tên sản phẩm<input name="name" value="{{ p.name }}"></label>
+            <label>Ngành hàng<select name="niche">{% for n in niches %}<option {{ 'selected' if n == p.niche }}>{{ n }}</option>{% endfor %}</select></label>
+            <label>Giá<input name="price" value="{{ p.price | int if p.price else '' }}"></label>
+            <label style="grid-column:1/-1">Link aff<input name="aff_link" value="{{ p.aff_link }}"></label>
+            <label style="grid-column:1/-1">Link sản phẩm<input name="product_link" value="{{ p.product_link }}"></label>
+            <label style="grid-column:1/-1">Link ảnh<input name="image_url" value="{{ p.image_url }}"></label>
+            <label style="grid-column:1/-1">Mô tả<textarea name="description" style="min-height:60px">{{ p.description }}</textarea></label>
+            <div><button class="primary">Lưu</button></div>
+          </form>
+          <form method="post" action="/products/{{ p.item_id }}/videos" enctype="multipart/form-data" class="form-grid" style="grid-template-columns:1fr; margin-top:12px; border-top:1px solid var(--line); padding-top:12px">
+            <label>Thêm video: link .mp4 / Google Drive<input name="video_url"></label>
+            <label>hoặc tải file video lên<input type="file" name="video_file" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.m4v,.webm"></label>
+            <div><button>Thêm video</button></div>
+          </form>
+          <div class="row" style="margin-top:12px">
+            <form class="inline" method="post" action="/products/{{ p.item_id }}/toggle"><button class="small">{{ 'Bỏ chặn' if p.blocked else 'Chặn (không đăng nữa)' }}</button></form>
+            <form class="inline" method="post" action="/products/{{ p.item_id }}/delete"><button class="small" onclick="return confirm('Xoá sản phẩm này?')">Xoá</button></form>
+          </div>
+        </div>
+      </details>
+    </td>
   </tr>
-  {% else %}<tr><td colspan="12" class="muted">Chưa có sản phẩm. Vào Cài đặt → “Săn sản phẩm”.</td></tr>{% endfor %}
+  {% else %}<tr><td colspan="9" class="muted">Chưa có sản phẩm. Chọn ngành hàng rồi nhập file Excel ở trên.</td></tr>{% endfor %}
 </table>
+{% set qs = 'niche=' ~ (niche | urlencode) ~ '&q=' ~ (q | urlencode) ~ '&only=' ~ only %}
+<div class="pager">
+  {% if p > 1 %}<a class="btn" href="?{{ qs }}&p={{ p - 1 }}">← Trước</a>{% endif %}
+  <span class="muted small">Trang {{ p }} / {{ ((total + per - 1) // per) or 1 }}</span>
+  {% if p * per < total %}<a class="btn" href="?{{ qs }}&p={{ p + 1 }}">Sau →</a>{% endif %}
+</div>
 </div>
 {% endblock %}

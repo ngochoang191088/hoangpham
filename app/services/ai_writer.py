@@ -28,13 +28,19 @@ def _n(value) -> str:
 
 
 def _facts(product: dict) -> str:
-    return (
-        f"Tên: {product['name']}\n"
-        f"Giá từ: {_n(product['price'])}đ\n"
-        f"Đã bán: {_n(product['sales'])}\n"
-        f"Đánh giá: {product['rating']}/5\n"
-        f"Shop: {product['shop_name']}"
-    )
+    """Thông tin sản phẩm đưa cho AI; chỉ gồm các trường bạn đã nhập."""
+    lines = [f"Tên: {product['name']}"]
+    if product.get("price"):
+        lines.append(f"Giá từ: {_n(product['price'])}đ")
+    if product.get("sales"):
+        lines.append(f"Đã bán: {_n(product['sales'])}")
+    if product.get("rating"):
+        lines.append(f"Đánh giá: {product['rating']}/5")
+    if product.get("shop_name"):
+        lines.append(f"Shop: {product['shop_name']}")
+    if product.get("description"):
+        lines.append(f"Mô tả / điểm nổi bật (do chủ page cung cấp): {product['description'][:1500]}")
+    return "\n".join(lines)
 
 
 def write_caption(page: dict, product: dict, disclosure: str) -> str:
@@ -145,20 +151,22 @@ def _claude_batch(texts: list[str], record_usage, poll_seconds: int = 30,
 
 def _template_caption(product: dict, angle: str) -> str:
     """Caption mẫu dùng khi chưa có ANTHROPIC_API_KEY (chế độ DEMO)."""
-    price = f"{_n(product['price'])}đ"
+    price = f"{_n(product['price'])}đ" if product.get("price") else "giá tốt"
     openers = {
         ANGLES[0]: f"🔥 Deal đang hot: {product['name']} chỉ từ {price}!",
         ANGLES[1]: f"Bạn đang cần một món tiện lợi hơn? Tham khảo {product['name']} nhé.",
-        ANGLES[2]: f"🎁 Gợi ý quà tặng dưới {price}: {product['name']}.",
+        ANGLES[2]: f"🎁 Gợi ý quà tặng: {product['name']} ({price}).",
         ANGLES[3]: f"💡 Vài lý do nhiều người chọn {product['name']}:",
         ANGLES[4]: f"So với loại thông thường, {product['name']} là lựa chọn đáng cân nhắc.",
     }
-    return (
-        f"{openers[angle]}\n"
-        f"✅ Đã bán {_n(product['sales'])} sản phẩm, đánh giá {product['rating']}/5\n"
-        f"🏪 Shop: {product['shop_name']}\n"
-        f"Xem chi tiết và giá mới nhất ở link bên dưới nhé!"
-    )
+    lines = [openers[angle]]
+    if product.get("description"):
+        lines.append(f"✨ {product['description'].strip().splitlines()[0][:200]}")
+    if product.get("sales"):
+        lines.append(f"✅ Đã bán {_n(product['sales'])} sản phẩm" +
+                     (f", đánh giá {product['rating']}/5" if product.get("rating") else ""))
+    lines.append("Xem chi tiết và giá mới nhất ở link bên dưới nhé!")
+    return "\n".join(lines)
 
 
 def check_content(caption: str, settings: dict, other_captions: list[str]) -> list[str]:

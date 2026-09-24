@@ -5,7 +5,9 @@
     <div class="row">
       <span class="pill {{ r.status }}">{{ {'published':'Đã đăng','pending':'Chờ duyệt','approved':'Đã duyệt','rejected':'Từ chối','failed':'Lỗi'}[r.status] }}</span>
       {% if show_page %}<a href="/pages/{{ r.page_id }}"><b>{{ r.page_name }}</b></a>{% endif %}
-      {% if r.source == 'facebook' %}<span class="pill niche">Đăng ngoài app</span>{% endif %}
+      {% if r.source == 'facebook' %}<span class="pill niche">Đăng ngoài app</span>
+      {% elif r.media_type == 'video' %}<span class="pill niche">🎬 Video</span>
+      {% else %}<span class="pill niche">🖼 Ảnh</span>{% endif %}
       <span class="muted small">
         {% if r.published_at %}Đăng lúc {{ r.published_at[:16].replace('T',' ') }}{% elif r.scheduled_at %}Lịch đăng {{ r.scheduled_at[:16].replace('T',' ') }}{% endif %}
       </span>

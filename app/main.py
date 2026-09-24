@@ -1,30 +1,32 @@
 import json
 import secrets
+import shutil
 from contextlib import asynccontextmanager
 from datetime import date, timedelta
 from pathlib import Path
-
-from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
-
-from app import config, db
 from urllib.parse import quote
 
-from app.services import ai_writer, costs, pipeline
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from starlette.middleware.sessions import SessionMiddleware
+
+from app import config, db
+from app.services import ai_writer, catalog, costs, facebook, importer, pipeline
 
 BASE = Path(__file__).resolve().parent
-security = HTTPBasic()
+PUBLIC_PATHS = ("/login", "/auth/", "/logout")
 
 
-def require_login(creds: HTTPBasicCredentials = Depends(security)) -> str:
-    ok_user = secrets.compare_digest(creds.username.encode(), config.ADMIN_USER.encode())
-    ok_pass = secrets.compare_digest(creds.password.encode(), config.ADMIN_PASSWORD.encode())
-    if not (ok_user and ok_pass):
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, headers={"WWW-Authenticate": "Basic"})
-    return creds.username
+def require_login(request: Request) -> dict | None:
+    """Mọi trang đều cần đăng nhập, trừ trang đăng nhập."""
+    if request.url.path.startswith(PUBLIC_PATHS):
+        return None
+    user = request.session.get("user")
+    if not user:
+        raise HTTPException(303, headers={"Location": "/login"})
+    return user
 
 
 @asynccontextmanager
@@ -33,7 +35,9 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="Quản lý 80 page", lifespan=lifespan, dependencies=[Depends(require_login)])
+app = FastAPI(title="Quản lý page Facebook", lifespan=lifespan, dependencies=[Depends(require_login)])
+app.add_middleware(SessionMiddleware, secret_key=config.SECRET_KEY, max_age=30 * 24 * 3600,
+                   https_only=config.BASE_URL.startswith("https"))
 app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
 templates = Jinja2Templates(directory=BASE / "templates")
 
@@ -55,6 +59,9 @@ def render(request: Request, name: str, **ctx) -> HTMLResponse:
         ctx.setdefault("pending_count", conn.execute(
             "SELECT COUNT(*) FROM posts WHERE status = 'pending'").fetchone()[0])
         ctx.setdefault("global_pause", db.get_settings(conn)["global_pause"])
+        ctx.setdefault("unassigned_count", conn.execute(
+            "SELECT COUNT(*) FROM pages WHERE niche = '' AND status != 'archived'").fetchone()[0])
+    ctx.setdefault("user", request.session.get("user"))
     return templates.TemplateResponse(request, name, ctx)
 
 
@@ -72,6 +79,92 @@ def back(request: Request, fallback: str = "/") -> RedirectResponse:
 
 def _days_ago(n: int) -> str:
     return (db.now() - timedelta(days=n)).isoformat()
+
+
+# ---------------- Đăng nhập ----------------
+
+@app.get("/login", response_class=HTMLResponse)
+def login_page(request: Request, error: str = ""):
+    return templates.TemplateResponse(request, "login.html", {"error": error})
+
+
+@app.post("/login")
+def login_demo(request: Request, password: str = Form(...)):
+    """Đăng nhập bằng mật khẩu, chỉ dùng cho bản DEMO (chưa cấu hình Facebook App)."""
+    if config.FB_LOGIN_ENABLED:
+        return go("/login")
+    if not secrets.compare_digest(password.encode(), config.ADMIN_PASSWORD.encode()):
+        return go("/login?error=" + quote("Sai mật khẩu"))
+    request.session["user"] = {"id": "demo", "name": "Tài khoản demo"}
+    with db.get_conn() as conn:
+        result = pipeline.sync_pages(conn)
+    return _after_login(result)
+
+
+@app.get("/auth/facebook")
+def auth_facebook(request: Request):
+    if not config.FB_LOGIN_ENABLED:
+        return go("/login")
+    state = secrets.token_urlsafe(16)
+    request.session["oauth_state"] = state
+    return RedirectResponse(facebook.login_url(state), status_code=303)
+
+
+@app.get("/auth/facebook/callback")
+def auth_facebook_callback(request: Request, code: str = "", state: str = "", error_description: str = ""):
+    if error_description or not code:
+        return go("/login?error=" + quote(error_description or "Đăng nhập Facebook bị huỷ"))
+    if not state or state != request.session.pop("oauth_state", None):
+        return go("/login?error=" + quote("Phiên đăng nhập không hợp lệ, hãy thử lại"))
+    try:
+        account = facebook.exchange_code(code)
+    except Exception as e:  # noqa: BLE001
+        return go("/login?error=" + quote(f"Không đăng nhập được Facebook: {e}"))
+    with db.get_conn() as conn:
+        s = db.get_settings(conn)
+        owner = s.get("owner_fb_id")
+        allowed = config.ALLOWED_FB_USERS or ([owner] if owner else [account["id"]])
+        if account["id"] not in allowed:
+            return go("/login?error=" + quote(f"Tài khoản {account['name']} không có quyền vào app này"))
+        db.set_setting(conn, "owner_fb_id", owner or account["id"])
+        db.set_setting(conn, "owner_name", account["name"])
+        db.set_setting(conn, "owner_token", account["token"])
+        expires = (db.now() + timedelta(seconds=int(account["expires_in"]))).isoformat() \
+            if account.get("expires_in") else ""
+        db.set_setting(conn, "owner_token_expires", expires)
+        try:
+            result = pipeline.sync_pages(conn, account["token"])
+        except Exception as e:  # noqa: BLE001
+            db.log(conn, "error", f"Không lấy được danh sách page: {e}")
+            result = {"total": 0, "new": 0, "lost": 0}
+    request.session["user"] = {"id": account["id"], "name": account["name"]}
+    return _after_login(result)
+
+
+def _after_login(result: dict) -> RedirectResponse:
+    msg = f"Đã nhận diện {result['total']} page."
+    with db.get_conn() as conn:
+        waiting = conn.execute("SELECT COUNT(*) FROM pages WHERE niche = '' AND status != 'archived'").fetchone()[0]
+    if waiting:
+        return go("/pages?niche=__none__", msg + f" Có {waiting} page chưa có ngành hàng, hãy chọn ngành cho chúng.")
+    return go("/", msg)
+
+
+@app.post("/logout")
+def logout(request: Request):
+    request.session.clear()
+    return go("/login")
+
+
+@app.post("/pages/sync")
+def pages_sync():
+    with db.get_conn() as conn:
+        try:
+            r = pipeline.sync_pages(conn)
+        except Exception as e:  # noqa: BLE001
+            return go("/pages", f"Không lấy được danh sách page: {e}. Hãy đăng nhập Facebook lại.", error=True)
+    msg = f"Đã nhận diện {r['total']} page: {r['new']} page mới, {r['lost']} page mất quyền quản lý."
+    return go("/pages?niche=__none__" if r["new"] else "/pages", msg)
 
 
 # ---------------- Tổng quan ----------------
@@ -120,7 +213,7 @@ def dashboard(request: Request, days: int = 30):
         if kpi["failed"]:
             alerts.append(("error", f"{kpi['failed']} bài đăng lỗi trong 48 giờ qua", "/posts?status=failed"))
         silent = conn.execute(
-            """SELECT id, name FROM pages WHERE status='active' AND id NOT IN
+            """SELECT id, name FROM pages WHERE status='active' AND niche != '' AND id NOT IN
                (SELECT page_id FROM posts WHERE status='published' AND published_at >= ?)""",
             (_days_ago(2),),
         ).fetchall()
@@ -128,11 +221,14 @@ def dashboard(request: Request, days: int = 30):
             alerts.append(("warn", f"Page “{p['name']}” không có bài nào trong 2 ngày", f"/pages/{p['id']}"))
         unassigned = q("SELECT COUNT(*) FROM pages WHERE niche = '' AND status != 'archived'")
         if unassigned:
-            alerts.append(("warn", f"{unassigned} page chưa được phân ngành hàng (chưa tạo bài)", "/pages/new"))
+            alerts.append(("warn", f"{unassigned} page chưa được chọn ngành hàng (chưa tạo bài)", "/pages?niche=__none__"))
         for n in niches:
             if n["pages"] < n["target_pages"]:
                 alerts.append(("warn", f"Ngành “{n['niche']}” mới có {n['pages']}/{n['target_pages']} page",
-                               f"/pages/new?niche={quote(n['niche'])}"))
+                               "/pages?niche=__none__"))
+            if n["pages"] and not n["products"]:
+                alerts.append(("error", f"Ngành “{n['niche']}” chưa có sản phẩm nào, hãy nhập file sản phẩm",
+                               f"/products?niche={quote(n['niche'])}"))
         flagged = q("SELECT COUNT(*) FROM posts WHERE status='pending' AND flags != '[]'")
         if flagged:
             alerts.append(("warn", f"{flagged} bài chờ duyệt bị gắn cờ kiểm duyệt", "/review?flagged=1"))
@@ -174,7 +270,8 @@ def _niche_stats(conn, since: str) -> list[dict]:
         return {r[0]: r[1:] for r in conn.execute(sql, args)}
 
     pages = grouped("""SELECT niche, SUM(status != 'archived'), SUM(status = 'active') FROM pages GROUP BY niche""")
-    products = grouped("SELECT niche, COUNT(*) FROM products WHERE blocked = 0 GROUP BY niche")
+    products = grouped("""SELECT niche, COUNT(*), SUM(item_id IN (SELECT item_id FROM videos)) FROM products
+                          WHERE blocked = 0 GROUP BY niche""")
     posts = grouped("""SELECT pages.niche, COUNT(*) FROM posts JOIN pages ON pages.id = posts.page_id
                        WHERE posts.status = 'published' AND posts.published_at >= ? GROUP BY pages.niche""", since)
     conv = grouped("""SELECT pages.niche, SUM(c.orders), SUM(c.commission) FROM conversions c
@@ -186,7 +283,8 @@ def _niche_stats(conn, since: str) -> list[dict]:
             "niche": name, "target_pages": n["target_pages"], "keywords": n["keywords"],
             "default_tone": n["default_tone"],
             "pages": pages.get(name, (0, 0))[0], "active": pages.get(name, (0, 0))[1],
-            "products": products.get(name, (0,))[0], "posts": posts.get(name, (0,))[0],
+            "products": products.get(name, (0, 0))[0], "with_video": products.get(name, (0, 0))[1] or 0,
+            "posts": posts.get(name, (0,))[0],
             "orders": conv.get(name, (0, 0))[0], "commission": conv.get(name, (0, 0))[1],
         })
     return sorted(rows, key=lambda r: (-r["commission"], r["niche"]))
@@ -274,7 +372,7 @@ def pages_list(request: Request, niche: str = "", status_: str = "", q: str = ""
         where.append("pages.status != 'archived'")
     if q:
         where.append("(pages.name LIKE ? OR pages.id = ?)"); args += [f"%{q}%", q]
-    per, p = 50, max(p, 1)
+    per, p = 100, max(p, 1)
     with db.get_conn() as conn:
         total = conn.execute(f"SELECT COUNT(*) FROM pages WHERE {' AND '.join(where)}", args[1:]).fetchone()[0]
         rows = conn.execute(
@@ -296,99 +394,42 @@ def pages_list(request: Request, niche: str = "", status_: str = "", q: str = ""
                   total=total, p=p, per=per)
 
 
-# ---------------- Thêm page ----------------
-
-def _add_page(conn, page_id: str, name: str, niche: str, tone: str = "", posts_per_day: int = 3,
-              link_mode: str = "comment", access_token: str = "") -> str | None:
-    """Thêm 1 page. Trả về thông báo lỗi, hoặc None nếu thành công."""
-    page_id, name, niche = page_id.strip(), name.strip(), niche.strip()
-    if not page_id.isdigit():
-        return f"ID page “{page_id}” không hợp lệ (ID page chỉ gồm chữ số)"
-    if not name:
-        return f"Page {page_id} thiếu tên"
-    nrow = conn.execute("SELECT * FROM niches WHERE name = ?", (niche,)).fetchone() if niche else None
-    if niche and not nrow:
-        return f"Ngành hàng “{niche}” chưa có, hãy tạo ở trang Ngành hàng trước"
-    old = conn.execute("SELECT status FROM pages WHERE id = ?", (page_id,)).fetchone()
-    if old and old["status"] != "archived":
-        return f"Page {page_id} đã có trong app"
-    conn.execute(
-        """INSERT INTO pages(id, name, niche, tone, access_token, posts_per_day, link_mode, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(id) DO UPDATE SET name=excluded.name, niche=excluded.niche, tone=excluded.tone,
-             posts_per_day=excluded.posts_per_day, link_mode=excluded.link_mode, status='active',
-             access_token=CASE WHEN excluded.access_token != '' THEN excluded.access_token ELSE access_token END""",
-        (page_id, name, niche, tone.strip() or (nrow["default_tone"] if nrow else "thân thiện, gần gũi"),
-         access_token.strip(), max(0, min(posts_per_day, 20)), link_mode, db.now_iso()),
-    )
-    db.log(conn, "info", f"Thêm page vào ngành hàng “{niche or 'chưa phân ngành'}”", page_id)
-    return None
-
-
-@app.get("/pages/new", response_class=HTMLResponse)
-def page_new(request: Request, niche: str = ""):
-    with db.get_conn() as conn:
-        niches = conn.execute(
-            """SELECT niches.name, niches.target_pages,
-                 (SELECT COUNT(*) FROM pages WHERE pages.niche = niches.name AND pages.status != 'archived') AS pages
-               FROM niches ORDER BY niches.name""").fetchall()
-        unassigned = conn.execute(
-            "SELECT * FROM pages WHERE niche = '' AND status != 'archived' ORDER BY name").fetchall()
-    return render(request, "page_new.html", niches=niches, unassigned=unassigned, niche=niche)
-
-
-@app.post("/pages/add")
-def page_add(page_id: str = Form(...), name: str = Form(...), niche: str = Form(""), tone: str = Form(""),
-             posts_per_day: int = Form(3), link_mode: str = Form("comment"), access_token: str = Form("")):
-    with db.get_conn() as conn:
-        err = _add_page(conn, page_id, name, niche, tone, posts_per_day, link_mode, access_token)
-    return go("/pages/new", err or f"Đã thêm page “{name.strip()}”", error=bool(err))
-
-
-@app.post("/pages/bulk")
-def page_bulk(lines: str = Form(...), niche: str = Form(""), posts_per_day: int = Form(3)):
-    """Mỗi dòng: ID page | Tên page | Ngành hàng (ngành hàng có thể bỏ trống để dùng ngành đã chọn)."""
-    added, errors = 0, []
-    with db.get_conn() as conn:
-        for line in lines.splitlines():
-            if not line.strip():
-                continue
-            parts = [x.strip() for x in line.split("|")]
-            if len(parts) < 2:
-                errors.append(f"Dòng “{line.strip()[:40]}” thiếu dấu |")
-                continue
-            err = _add_page(conn, parts[0], parts[1], parts[2] if len(parts) > 2 and parts[2] else niche,
-                            posts_per_day=posts_per_day)
-            if err:
-                errors.append(err)
-            else:
-                added += 1
-    msg = f"Đã thêm {added} page." + (f" {len(errors)} dòng lỗi: " + "; ".join(errors[:5]) if errors else "")
-    return go("/pages/new", msg, error=bool(errors))
-
-
 @app.post("/pages/assign")
-async def page_assign(request: Request):
-    """Phân ngành hàng cho các page chưa có ngành (form gửi niche_<page_id>=<ngành>)."""
-    form = await request.form()
-    n = 0
+def pages_assign(request: Request, niche: str = Form(""), action: str = Form("assign"),
+                 ids: list[str] = Form(default=[])):
+    """Áp ngành hàng (hoặc tạm dừng / bật) cho các page đã chọn."""
+    if not ids:
+        return back(request)
+    marks = ",".join("?" * len(ids))
     with db.get_conn() as conn:
-        valid = set(db.niche_names(conn))
-        for key, value in form.items():
-            if key.startswith("niche_") and value in valid:
-                n += conn.execute("UPDATE pages SET niche = ? WHERE id = ? AND niche = ''",
-                                  (value, key[6:])).rowcount
-        if n:
-            db.log(conn, "info", f"Phân ngành hàng cho {n} page")
-    return go("/pages/new", f"Đã phân ngành hàng cho {n} page")
+        if action == "assign":
+            if niche and niche not in db.niche_names(conn):
+                return go("/pages", "Ngành hàng không tồn tại", error=True)
+            tone = conn.execute("SELECT default_tone FROM niches WHERE name = ?", (niche,)).fetchone()
+            n = conn.execute(f"UPDATE pages SET niche = ? WHERE id IN ({marks})", [niche, *ids]).rowcount
+            if tone:
+                conn.execute(f"UPDATE pages SET tone = ? WHERE id IN ({marks}) AND tone = 'thân thiện, gần gũi'",
+                             [tone[0], *ids])
+            msg = f"Đã áp ngành hàng “{niche}” cho {n} page" if niche else f"Đã bỏ ngành hàng của {n} page"
+        elif action in ("pause", "resume"):
+            old, new = ("active", "paused") if action == "pause" else ("paused", "active")
+            n = conn.execute(f"UPDATE pages SET status = ? WHERE status = ? AND id IN ({marks})",
+                             [new, old, *ids]).rowcount
+            msg = f"Đã {'tạm dừng' if action == 'pause' else 'bật lại'} {n} page"
+        else:
+            return back(request)
+        db.log(conn, "info", msg)
+    return RedirectResponse(_with_msg(request.headers.get("referer") or "/pages", msg), status_code=303)
 
 
-@app.post("/pages/import-meta")
-def page_import_meta():
-    with db.get_conn() as conn:
-        n = pipeline.import_pages(conn)
-    msg = f"Đã đồng bộ {n} page từ Meta" if config.FB_ENABLED else "Chưa có FB_SYSTEM_USER_TOKEN nên chưa nhập được từ Meta"
-    return go("/pages/new", msg, error=not config.FB_ENABLED)
+def _with_msg(url: str, msg: str) -> str:
+    base = url.split("&msg=")[0].split("?msg=")[0]
+    return f"{base}{'&' if '?' in base else '?'}msg={quote(msg)}"
+
+
+@app.post("/pages/{page_id}/niche")
+def page_set_niche(request: Request, page_id: str, niche: str = Form("")):
+    return pages_assign(request, niche=niche, action="assign", ids=[page_id])
 
 
 @app.get("/pages/{page_id}", response_class=HTMLResponse)
@@ -572,22 +613,151 @@ def review_bulk(request: Request, action: str = Form(...), ids: list[int] = Form
 # ---------------- Sản phẩm ----------------
 
 @app.get("/products", response_class=HTMLResponse)
-def products(request: Request, niche: str = "", q: str = ""):
+def products(request: Request, niche: str = "", q: str = "", only: str = "", p: int = 1):
     where, args = ["1=1"], []
     if niche:
         where.append("niche = ?"); args.append(niche)
     if q:
-        where.append("name LIKE ?"); args.append(f"%{q}%")
+        where.append("(name LIKE ? OR aff_link LIKE ? OR product_link LIKE ?)"); args += [f"%{q}%"] * 3
+    if only == "video":
+        where.append("item_id IN (SELECT item_id FROM videos)")
+    elif only == "novideo":
+        where.append("item_id NOT IN (SELECT item_id FROM videos)")
+    elif only == "incomplete":
+        where.append("(name = '' OR aff_link = '' OR (image_url = '' AND item_id NOT IN (SELECT item_id FROM videos)))")
+    per, p = 50, max(p, 1)
     with db.get_conn() as conn:
+        total = conn.execute(f"SELECT COUNT(*) FROM products WHERE {' AND '.join(where)}", args).fetchone()[0]
         rows = conn.execute(
             f"""SELECT products.*,
                   (SELECT COUNT(*) FROM posts WHERE posts.item_id = products.item_id AND status='published') AS used,
                   (SELECT COALESCE(SUM(commission),0) FROM posts WHERE posts.item_id = products.item_id) AS earned
-                FROM products WHERE {' AND '.join(where)} ORDER BY score DESC LIMIT 300""",
-            args,
+                FROM products WHERE {' AND '.join(where)}
+                ORDER BY blocked, fetched_at DESC, score DESC LIMIT ? OFFSET ?""",
+            args + [per, (p - 1) * per],
         ).fetchall()
+        videos: dict[str, list] = {}
+        if rows:
+            marks = ",".join("?" * len(rows))
+            for v in conn.execute(f"SELECT * FROM videos WHERE item_id IN ({marks}) ORDER BY id",
+                                  [r["item_id"] for r in rows]):
+                videos.setdefault(v["item_id"], []).append(v)
+        counts = {r[0]: (r[1], r[2]) for r in conn.execute(
+            """SELECT niche, COUNT(*), SUM(item_id IN (SELECT item_id FROM videos)) FROM products
+               WHERE blocked = 0 GROUP BY niche""")}
         niches = db.niche_names(conn)
-    return render(request, "products.html", rows=rows, niches=niches, niche=niche, q=q)
+    return render(request, "products.html", rows=rows, videos=videos, niches=niches, niche=niche, q=q,
+                  only=only, total=total, p=p, per=per, counts=counts)
+
+
+@app.get("/products/template.xlsx")
+def product_template(niche: str = ""):
+    data = importer.template_xlsx(niche)
+    filename = quote(f"mau-san-pham-{niche or 'nganh-hang'}.xlsx")
+    return Response(data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"})
+
+
+@app.post("/products/import")
+async def product_import(niche: str = Form(""), file: UploadFile = File(...)):
+    """Nhập sản phẩm + link aff + video từ file Excel / CSV / Word / text của 1 ngành hàng."""
+    data = await file.read()
+    try:
+        rows = importer.read_file(file.filename or "", data)
+    except Exception as e:  # noqa: BLE001
+        return go(f"/products?niche={quote(niche)}", f"Không đọc được file: {e}", error=True)
+    if not rows:
+        return go(f"/products?niche={quote(niche)}", "File không có dòng sản phẩm nào", error=True)
+    with db.get_conn() as conn:
+        r = catalog.save_rows(conn, rows, niche, source="file")
+        db.log(conn, "info", f"Nhập file “{file.filename}” vào ngành “{niche}”: {r['added']} mới, "
+                             f"{r['updated']} cập nhật, {r['videos']} video")
+    return _catalog_result(niche, r)
+
+
+def _catalog_result(niche: str, r: dict) -> RedirectResponse:
+    msg = f"Đã thêm {r['added']} sản phẩm, cập nhật {r['updated']}, gắn {r['videos']} video."
+    if r["errors"]:
+        msg += f" {len(r['errors'])} lưu ý: " + "; ".join(r["errors"][:6])
+    return go(f"/products?niche={quote(niche)}", msg, error=bool(r["errors"]) and not (r["added"] or r["updated"]))
+
+
+@app.post("/products/add")
+async def product_add(niche: str = Form(...), aff_link: str = Form(...), product_link: str = Form(""),
+                      name: str = Form(""), price: str = Form(""), description: str = Form(""),
+                      image_url: str = Form(""), video_url: str = Form(""),
+                      video_file: UploadFile | None = File(None)):
+    row = {k: v.strip() for k, v in dict(aff_link=aff_link, product_link=product_link, name=name, price=price,
+                                          description=description, image_url=image_url,
+                                          video_url=video_url).items() if v and v.strip()}
+    with db.get_conn() as conn:
+        r = catalog.save_rows(conn, [row], niche, source="manual")
+        if video_file is not None and video_file.filename and (r["added"] or r["updated"]):
+            try:
+                path = _store_upload(video_file)
+                catalog.add_video(conn, importer.make_item_id(row), file_path=path, title=video_file.filename)
+                r["videos"] += 1
+            except ValueError as e:
+                r["errors"].append(str(e))
+    return _catalog_result(niche, r)
+
+
+def _store_upload(upload: UploadFile) -> str:
+    """Lưu video tải lên xuống đĩa theo từng khối (không đọc cả file vào RAM)."""
+    ext = Path(upload.filename or "").suffix.lower()
+    if ext not in catalog.VIDEO_EXTS:
+        raise ValueError("Chỉ nhận video .mp4, .mov, .m4v, .webm")
+    path = Path(catalog.save_upload(upload.filename, b""))
+    with path.open("wb") as fh:
+        shutil.copyfileobj(upload.file, fh, length=1024 * 1024)
+    return str(path)
+
+
+@app.post("/products/{item_id}/edit")
+def product_edit(request: Request, item_id: str, name: str = Form(""), niche: str = Form(...),
+                 aff_link: str = Form(""), product_link: str = Form(""), price: str = Form(""),
+                 description: str = Form(""), image_url: str = Form("")):
+    with db.get_conn() as conn:
+        if niche not in db.niche_names(conn):
+            return back(request)
+        conn.execute(
+            """UPDATE products SET name=?, niche=?, aff_link=?, product_link=?, price=?, description=?, image_url=?
+               WHERE item_id=?""",
+            (name.strip(), niche, aff_link.strip(), product_link.strip(), importer.parse_price(price),
+             description.strip(), image_url.strip(), item_id),
+        )
+    return RedirectResponse(_with_msg(request.headers.get("referer") or "/products", "Đã lưu sản phẩm"), 303)
+
+
+@app.post("/products/{item_id}/videos")
+async def product_video_add(request: Request, item_id: str, video_url: str = Form(""),
+                            video_file: UploadFile | None = File(None)):
+    with db.get_conn() as conn:
+        if not conn.execute("SELECT 1 FROM products WHERE item_id = ?", (item_id,)).fetchone():
+            raise HTTPException(404)
+        try:
+            if video_file is not None and video_file.filename:
+                catalog.add_video(conn, item_id, file_path=_store_upload(video_file), title=video_file.filename)
+            elif facebook.direct_video_url(video_url):
+                catalog.add_video(conn, item_id, url=video_url.strip())
+            else:
+                raise ValueError("Link video phải là file .mp4 hoặc Google Drive")
+        except ValueError as e:
+            return RedirectResponse(_with_msg(request.headers.get("referer") or "/products", str(e)) + "&err=1", 303)
+    return RedirectResponse(_with_msg(request.headers.get("referer") or "/products", "Đã thêm video"), 303)
+
+
+@app.post("/videos/{video_id}/delete")
+def video_delete(request: Request, video_id: int):
+    with db.get_conn() as conn:
+        v = conn.execute("SELECT * FROM videos WHERE id = ?", (video_id,)).fetchone()
+        if v:
+            conn.execute("UPDATE posts SET media_type='photo', video_id=NULL WHERE video_id=? AND status IN "
+                         "('pending','approved')", (video_id,))
+            conn.execute("DELETE FROM videos WHERE id = ?", (video_id,))
+            if v["file_path"] and not conn.execute("SELECT 1 FROM posts WHERE video_id = ?", (video_id,)).fetchone():
+                Path(v["file_path"]).unlink(missing_ok=True)
+    return back(request, "/products")
 
 
 @app.post("/products/{item_id}/toggle")
@@ -595,6 +765,23 @@ def product_toggle(request: Request, item_id: str):
     with db.get_conn() as conn:
         conn.execute("UPDATE products SET blocked = 1 - blocked WHERE item_id = ?", (item_id,))
     return back(request)
+
+
+@app.post("/products/{item_id}/delete")
+def product_delete(request: Request, item_id: str):
+    with db.get_conn() as conn:
+        used = conn.execute("SELECT COUNT(*) FROM posts WHERE item_id = ?", (item_id,)).fetchone()[0]
+        if used:
+            conn.execute("UPDATE products SET blocked = 1 WHERE item_id = ?", (item_id,))
+            msg = "Sản phẩm đã có bài đăng nên được chuyển sang “Chặn” thay vì xoá"
+        else:
+            for v in conn.execute("SELECT file_path FROM videos WHERE item_id = ?", (item_id,)):
+                if v[0]:
+                    Path(v[0]).unlink(missing_ok=True)
+            conn.execute("DELETE FROM videos WHERE item_id = ?", (item_id,))
+            conn.execute("DELETE FROM products WHERE item_id = ?", (item_id,))
+            msg = "Đã xoá sản phẩm"
+    return RedirectResponse(_with_msg(request.headers.get("referer") or "/products", msg), 303)
 
 
 # ---------------- Cài đặt & chạy việc ----------------

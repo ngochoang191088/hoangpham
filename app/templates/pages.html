@@ -2,13 +2,29 @@
 {% block title %}Page{% endblock %}
 {% block content %}
 <div class="row" style="justify-content: space-between; margin-bottom: 12px">
-  <h1 style="margin:0">Tất cả page ({{ total | num }})</h1>
-  <a class="btn primary" href="/pages/new">+ Thêm page</a>
+  <h1 style="margin:0">Page của bạn ({{ total | num }})</h1>
+  <form class="inline" method="post" action="/pages/sync">
+    <button class="primary" title="Lấy lại danh sách page từ tài khoản Facebook đang đăng nhập">⟳ Nhận diện lại page từ Facebook</button>
+  </form>
 </div>
+
+<div class="tabs">
+  <a class="{{ 'on' if not niche and not status_ }}" href="/pages">Tất cả</a>
+  <a class="{{ 'on' if niche == '__none__' }}" href="/pages?niche=__none__">Chưa chọn ngành hàng {% if unassigned_count %}<span class="badge">{{ unassigned_count }}</span>{% endif %}</a>
+  <a class="{{ 'on' if status_ == 'restricted' }}" href="/pages?status_=restricted">Bị hạn chế / mất quyền</a>
+  <a class="{{ 'on' if status_ == 'archived' }}" href="/pages?status_=archived">Đã gỡ</a>
+</div>
+
+{% if niche == '__none__' %}
+<div class="alert warn">Các page này đã được nhận diện từ Facebook nhưng <b>chưa có ngành hàng</b> nên AI chưa tạo bài.
+  Tick chọn page → chọn ngành hàng ở thanh bên dưới → bấm <b>Áp ngành hàng</b>. Hoặc chọn ngành ngay trên từng dòng.</div>
+{% endif %}
+
 <form class="filters" method="get">
   <input name="q" value="{{ q }}" placeholder="Tìm tên hoặc ID page…">
-  <select name="niche"><option value="">Mọi ngành hàng</option>{% for n in niches %}<option {{ 'selected' if n == niche }}>{{ n }}</option>{% endfor %}
-    <option value="__none__" {{ 'selected' if niche == '__none__' }}>(Chưa phân ngành)</option></select>
+  <select name="niche"><option value="">Mọi ngành hàng</option>
+    <option value="__none__" {{ 'selected' if niche == '__none__' }}>(Chưa chọn ngành hàng)</option>
+    {% for n in niches %}<option {{ 'selected' if n == niche }}>{{ n }}</option>{% endfor %}</select>
   <select name="status_">
     <option value="">Mọi trạng thái</option>
     {% for k, v in {'active':'Hoạt động','paused':'Tạm dừng','restricted':'Bị hạn chế','archived':'Đã gỡ'}.items() %}<option value="{{ k }}" {{ 'selected' if k == status_ }}>{{ v }}</option>{% endfor %}
@@ -16,17 +32,40 @@
   <input type="hidden" name="sort" value="{{ sort }}">
   <button>Lọc</button>
 </form>
+
+<form id="bulk" method="post" action="/pages/assign"></form>
+<div class="card" style="position: sticky; top: 49px; z-index: 5; margin-bottom: 12px; padding: 10px 16px">
+  <div class="row">
+    <b class="small" id="picked">Đã chọn 0 page</b>
+    <select form="bulk" name="niche"><option value="">— chọn ngành hàng —</option>
+      {% for n in niches %}<option>{{ n }}</option>{% endfor %}</select>
+    <button form="bulk" class="primary" name="action" value="assign" onclick="return checkPick(this)">Áp ngành hàng cho page đã chọn</button>
+    <button form="bulk" name="action" value="pause">Tạm dừng</button>
+    <button form="bulk" name="action" value="resume">Bật lại</button>
+    <a class="small" href="/niches" style="margin-left:auto">Quản lý danh sách ngành hàng →</a>
+  </div>
+</div>
+
 {% macro sortlink(key, label) %}<a href="?niche={{ niche | urlencode }}&status_={{ status_ }}&q={{ q | urlencode }}&sort={{ key }}">{{ label }}{{ ' ↓' if sort == key }}</a>{% endmacro %}
 <div class="card table-wrap">
 <table>
-  <tr><th>{{ sortlink('name', 'Page') }}</th><th>Ngành hàng</th><th>Trạng thái</th><th class="num">Bài/ngày</th>
+  <tr><th><input type="checkbox" onclick="document.querySelectorAll('.pick').forEach(c => c.checked = this.checked); countPick()"></th>
+    <th>{{ sortlink('name', 'Page') }}</th><th>Ngành hàng</th><th>Trạng thái</th><th class="num">Bài/ngày</th>
     <th class="num">{{ sortlink('posts', 'Bài 30 ngày') }}</th><th class="num">{{ sortlink('engagement', 'Tương tác') }}</th>
     <th class="num">{{ sortlink('orders', 'Đơn') }}</th><th class="num">{{ sortlink('commission', 'Hoa hồng') }}</th>
-    <th>{{ sortlink('last', 'Bài gần nhất') }}</th><th>Chờ duyệt / lỗi</th><th></th></tr>
+    <th>{{ sortlink('last', 'Bài gần nhất') }}</th><th>Chờ duyệt / lỗi</th></tr>
   {% for p in rows %}
   <tr>
-    <td><a href="/pages/{{ p.id }}"><b>{{ p.name }}</b></a></td>
-    <td>{% if p.niche %}<span class="pill niche">{{ p.niche }}</span>{% else %}<a class="pill pending" href="/pages/new">Chưa phân ngành</a>{% endif %}</td>
+    <td><input class="pick" type="checkbox" form="bulk" name="ids" value="{{ p.id }}" onchange="countPick()"></td>
+    <td><a href="/pages/{{ p.id }}"><b>{{ p.name }}</b></a><div class="small muted">ID {{ p.id }}</div></td>
+    <td>
+      <form method="post" action="/pages/{{ p.id }}/niche">
+        <select name="niche" onchange="this.form.submit()" style="{{ 'border-color: var(--warn); background: var(--warn-soft)' if not p.niche }}">
+          <option value="">— chưa chọn —</option>
+          {% for n in niches %}<option {{ 'selected' if n == p.niche }}>{{ n }}</option>{% endfor %}
+        </select>
+      </form>
+    </td>
     <td><span class="pill {{ p.status }}">{{ {'active':'Hoạt động','paused':'Tạm dừng','restricted':'Bị hạn chế','archived':'Đã gỡ'}[p.status] }}</span></td>
     <td class="num">{{ p.posts_per_day }}</td>
     <td class="num">{{ p.posts }}</td>
@@ -36,10 +75,8 @@
     <td class="small muted">{{ p.last_published[:16].replace('T',' ') if p.last_published else '—' }}</td>
     <td>{% if p.pending %}<a href="/review?page_id={{ p.id }}">{{ p.pending }} chờ</a>{% endif %}
         {% if p.failed %}<a class="flag" href="/posts?status=failed&page_id={{ p.id }}">{{ p.failed }} lỗi</a>{% endif %}</td>
-    <td>{% if p.status in ('active', 'paused') %}<form class="inline" method="post" action="/pages/{{ p.id }}/toggle">
-      <button class="small">{{ 'Dừng' if p.status == 'active' else '▶ Bật' }}</button></form>{% endif %}</td>
   </tr>
-  {% endfor %}
+  {% else %}<tr><td colspan="11" class="muted">Không có page nào.</td></tr>{% endfor %}
 </table>
 {% set qs = 'niche=' ~ (niche | urlencode) ~ '&status_=' ~ status_ ~ '&q=' ~ (q | urlencode) ~ '&sort=' ~ sort %}
 <div class="pager">
@@ -48,4 +85,14 @@
   {% if p * per < total %}<a class="btn" href="?{{ qs }}&p={{ p + 1 }}">Sau →</a>{% endif %}
 </div>
 </div>
+<script>
+function countPick() {
+  document.getElementById('picked').textContent = 'Đã chọn ' + document.querySelectorAll('.pick:checked').length + ' page';
+}
+function checkPick(btn) {
+  if (!document.querySelectorAll('.pick:checked').length) { alert('Hãy tick chọn ít nhất 1 page'); return false; }
+  if (!btn.form.niche.value) { alert('Hãy chọn ngành hàng'); return false; }
+  return true;
+}
+</script>
 {% endblock %}

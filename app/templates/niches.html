@@ -10,24 +10,26 @@
     <a class="btn primary" href="#them-nganh">+ Thêm ngành hàng</a>
   </div>
 </div>
-<p class="muted">Mỗi ngành hàng có số page mục tiêu (ví dụ 5 page/ngành). AI chỉ lấy sản phẩm đúng ngành cho page thuộc ngành đó.
-  Một sản phẩm tối đa được đăng trên vài page cùng ngành mỗi ngày để tránh trùng lặp.</p>
+<p class="muted">Quy trình: <b>1.</b> Tạo ngành hàng → <b>2.</b> <a href="/pages?niche=__none__">Gán page vào ngành</a> →
+  <b>3.</b> <a href="/products">Nhập file sản phẩm + link aff + video</a> cho từng ngành → <b>4.</b> AI viết bài, bạn duyệt, app tự đăng.
+  Mỗi ngành có số page mục tiêu (ví dụ 5 page/ngành).</p>
 
 <div class="card table-wrap" style="margin-bottom:16px">
 <table>
-  <tr><th>Ngành hàng</th><th>Số page / mục tiêu</th><th class="num">Sản phẩm trong kho</th><th class="num">Bài {{ days }} ngày</th>
+  <tr><th>Ngành hàng</th><th>Số page / mục tiêu</th><th class="num">Sản phẩm</th><th class="num">Có video</th><th class="num">Bài {{ days }} ngày</th>
     <th class="num">Đơn</th><th class="num">Hoa hồng</th><th class="num">TB / page</th><th></th></tr>
   {% for n in rows %}
   <tr>
     <td><a href="/pages?niche={{ n.niche | urlencode }}"><b>{{ n.niche }}</b></a></td>
     <td style="min-width:160px">
       <div class="row small"><b>{{ n.pages }}</b> / {{ n.target_pages }}
-        {% if n.pages < n.target_pages %}<a class="pill pending" href="/pages/new?niche={{ n.niche | urlencode }}">thiếu {{ n.target_pages - n.pages }}</a>
+        {% if n.pages < n.target_pages %}<a class="pill pending" href="/pages?niche=__none__">thiếu {{ n.target_pages - n.pages }}</a>
         {% elif n.pages > n.target_pages %}<span class="pill niche">dư {{ n.pages - n.target_pages }}</span>
         {% else %}<span class="pill published">đủ</span>{% endif %}</div>
       <div class="bar"><span style="width: {{ [100, (n.pages / (n.target_pages or 1) * 100)] | min | round }}%"></span></div>
     </td>
-    <td class="num">{{ n.products }}</td>
+    <td class="num"><a href="/products?niche={{ n.niche | urlencode }}">{{ n.products }}</a>{% if not n.products %} <a class="pill failed" href="/products?niche={{ n.niche | urlencode }}">nhập ngay</a>{% endif %}</td>
+    <td class="num">{{ n.with_video }}</td>
     <td class="num">{{ n.posts | num }}</td>
     <td class="num">{{ n.orders | num }}</td>
     <td class="num"><b>{{ n.commission | vnd }}</b></td>
@@ -43,7 +45,7 @@
   <div class="card">
     <div class="row" style="justify-content: space-between">
       <h2 style="margin:0">{{ n.niche }}</h2>
-      <a class="small" href="/pages/new?niche={{ n.niche | urlencode }}">+ Thêm page</a>
+      <span class="row small"><a href="/pages?niche=__none__">+ Gán page</a> · <a href="/products?niche={{ n.niche | urlencode }}">Sản phẩm ({{ n.products }})</a></span>
     </div>
     <div class="small muted" style="margin:4px 0 8px">Từ khoá: {{ (n.keywords | loads) | join(', ') or '—' }}</div>
     {% for pg in by_niche.get(n.niche, []) %}
@@ -57,7 +59,7 @@
       <form method="post" action="/niches/update" class="form-grid" style="grid-template-columns:1fr; margin-top:8px">
         <input type="hidden" name="old_name" value="{{ n.niche }}">
         <label>Tên ngành hàng<input name="name" value="{{ n.niche }}" required></label>
-        <label>Từ khoá săn sản phẩm (cách nhau dấu phẩy)<textarea name="keywords" style="min-height:70px">{{ (n.keywords | loads) | join(', ') }}</textarea></label>
+        <label>Từ khoá (không bắt buộc)<textarea name="keywords" style="min-height:70px">{{ (n.keywords | loads) | join(', ') }}</textarea></label>
         <label>Số page mục tiêu<input type="number" name="target_pages" min="0" value="{{ n.target_pages }}"></label>
         <label>Giọng văn mặc định cho page mới<input name="default_tone" value="{{ n.default_tone }}"></label>
         <button class="primary">Lưu</button>
@@ -77,7 +79,7 @@
     <label>Tên ngành hàng<input name="name" placeholder="Ví dụ: Đồ ăn vặt" required></label>
     <label>Số page mục tiêu<input type="number" name="target_pages" min="0" value="5"></label>
     <label>Giọng văn mặc định<input name="default_tone" value="thân thiện, gần gũi"></label>
-    <label style="grid-column: 1 / -1">Từ khoá săn sản phẩm trên Shopee (cách nhau dấu phẩy)
+    <label style="grid-column: 1 / -1">Từ khoá (không bắt buộc, dùng khi bật tự săn sản phẩm qua Shopee Open API)
       <input name="keywords" placeholder="bánh tráng, khô gà, hạt dinh dưỡng, trà sữa"></label>
     <div><button class="primary">Tạo ngành hàng</button></div>
   </form>
