@@ -16,7 +16,8 @@
   <div class="card">
     <h2>1. Nhập file cho ngành hàng</h2>
     <p class="muted small">Mỗi ngành hàng 1 file Excel riêng. Mỗi dòng: <b>Tên sản phẩm | Link sản phẩm | Link aff | Giá | Mô tả | Link ảnh | Link video</b>.
-      Bắt buộc có <b>Link aff</b>. Có <b>Link video</b> thì app đăng video; không có thì đăng ảnh sản phẩm.
+      Bắt buộc có <b>Link sản phẩm</b> (app lấy ảnh, tên từ đây). <b>Link aff</b> chỉ gắn vào bài / bình luận.
+      App tự làm 3-5 ảnh đẹp + 1 video ngắn cho mỗi sản phẩm (trang <a href="/studio">Studio</a>).
       Nhận file <b>.xlsx, .csv, .docx</b> (bảng hoặc danh sách link), <b>.txt</b>.</p>
     <form method="post" action="/products/import" enctype="multipart/form-data" class="form-grid" style="grid-template-columns:1fr">
       <label>Ngành hàng<select name="niche" required id="import-niche" onchange="document.getElementById('tpl').href='/products/template.xlsx?niche='+encodeURIComponent(this.value)">
@@ -32,11 +33,11 @@
     <form method="post" action="/products/add" enctype="multipart/form-data" class="form-grid">
       <label>Ngành hàng<select name="niche" required><option value="">— chọn —</option>
         {% for n in niches %}<option {{ 'selected' if n == niche }}>{{ n }}</option>{% endfor %}</select></label>
-      <label>Link aff *<input name="aff_link" placeholder="https://s.shopee.vn/..." required></label>
-      <label>Link sản phẩm<input name="product_link" placeholder="https://shopee.vn/...-i.123.456"></label>
+      <label>Link sản phẩm *<input name="product_link" placeholder="https://shopee.vn/...-i.123.456" required></label>
+      <label>Link aff (gắn vào bài / bình luận)<input name="aff_link" placeholder="https://s.shopee.vn/..."></label>
       <label>Tên sản phẩm<input name="name" placeholder="Bỏ trống: lấy từ link"></label>
       <label>Giá<input name="price" placeholder="199000 hoặc 199k"></label>
-      <label>Link ảnh<input name="image_url" placeholder="https://...jpg"></label>
+      <label>Link ảnh (bỏ trống: lấy từ Shopee)<input name="image_url" placeholder="https://...jpg"></label>
       <label style="grid-column: 1 / -1">Mô tả / điểm nổi bật (AI dựa vào đây để viết)<textarea name="description" style="min-height:60px"></textarea></label>
       <label>Link video (.mp4 / Google Drive)<input name="video_url"></label>
       <label>Hoặc tải video lên<input type="file" name="video_file" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.m4v,.webm"></label>
@@ -60,15 +61,17 @@
 
 <div class="card table-wrap">
 <table>
-  <tr><th></th><th>Sản phẩm</th><th>Ngành hàng</th><th class="num">Giá</th><th>Link aff</th><th>Đăng bằng</th>
+  <tr><th></th><th>Sản phẩm</th><th>Ngành hàng</th><th class="num">Giá</th><th>Link aff</th><th>Video riêng</th>
     <th class="num">Đã đăng</th><th class="num">Hoa hồng</th><th></th></tr>
   {% for p in rows %}
   {% set vids = videos.get(p.item_id, []) %}
   <tr style="{{ 'opacity:.5' if p.blocked }}">
-    <td>{% if p.image_url %}<img src="{{ p.image_url }}" alt="" loading="lazy" onerror="this.style.visibility='hidden'" style="width:48px;height:48px;object-fit:cover;border-radius:6px">{% endif %}</td>
+    {% set thumb = p.image_url or ((p.src_first | media) if p.src_first else '') %}
+    <td>{% if thumb %}<img src="{{ thumb }}" alt="" loading="lazy" onerror="this.style.visibility='hidden'" style="width:48px;height:48px;object-fit:cover;border-radius:6px">{% endif %}</td>
     <td style="min-width:220px">
       {% if p.name %}<b>{{ p.name }}</b>{% else %}<span class="flag">⚠ Chưa có tên</span>{% endif %}
-      {% if p.product_link %}<div class="small"><a href="{{ p.product_link }}" target="_blank" rel="noopener">Xem trên Shopee ↗</a></div>{% endif %}
+      <div class="small row" style="gap:10px"><a href="/studio/{{ p.item_id | urlencode }}">🎨 Studio{{ {'ready':' ✓','processing':' …','error':' ⚠'}.get(p.kit_status, '') }}</a>
+        {% if p.product_link %}<a href="{{ p.product_link }}" target="_blank" rel="noopener">Shopee ↗</a>{% endif %}</div>
       {% if p.description %}<div class="small muted">{{ p.description[:90] }}{{ '…' if p.description | length > 90 }}</div>{% endif %}
       {% if p.blocked %}<span class="pill failed">Đã chặn</span>{% endif %}
     </td>
@@ -81,8 +84,7 @@
           <span class="muted">{{ (v.title or v.url or v.file_path)[-28:] }}</span>
           <form class="inline" method="post" action="/videos/{{ v.id }}/delete"><button class="small" style="padding:0 6px" title="Xoá video">✕</button></form>
         </div>{% endfor %}
-      {% elif p.image_url %}🖼 Ảnh sản phẩm
-      {% else %}<span class="flag">⚠ Chưa có ảnh/video</span>{% endif %}
+      {% else %}<span class="muted">—</span>{% endif %}
     </td>
     <td class="num">{{ p.used }}</td>
     <td class="num">{{ p.earned | vnd }}</td>

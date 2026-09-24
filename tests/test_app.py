@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 
@@ -5,6 +6,7 @@ os.environ["DB_PATH"] = os.path.join(tempfile.mkdtemp(), "test.db")
 os.environ["ADMIN_USER"] = "admin"
 os.environ["ADMIN_PASSWORD"] = "secret"
 os.environ["UPLOAD_DIR"] = os.path.join(tempfile.mkdtemp(), "uploads")
+os.environ["MEDIA_DIR"] = os.path.join(tempfile.mkdtemp(), "media")
 for key in ("FB_APP_ID", "FB_APP_SECRET", "FB_SYSTEM_USER_TOKEN", "SHOPEE_APP_ID", "SHOPEE_APP_SECRET",
             "ANTHROPIC_API_KEY"):
     os.environ[key] = ""
@@ -20,7 +22,7 @@ from app.services import ai_writer, facebook, importer, pipeline, shopee  # noqa
 
 @pytest.fixture(scope="module")
 def client():
-    demo.seed(n_pages=15, days=5)
+    demo.seed(n_pages=15, days=5, kit_niches=0)
     with TestClient(app) as c:
         r = c.post("/login", data={"password": "secret"})
         assert r.status_code == 200
@@ -168,8 +170,9 @@ def test_import_excel_for_niche(client):
     ])
     r = client.post("/products/import", data={"niche": "Đồ ăn vặt"},
                     files={"file": ("an-vat.xlsx", data, "application/octet-stream")})
-    assert "Đã thêm 3 sản phẩm" in r.text and "gắn 1 video" in r.text
-    assert "thiếu link aff" in r.text and "TikTok" in r.text
+    # Sản phẩm xác định bằng link sản phẩm; thiếu link aff vẫn lưu nhưng được cảnh báo
+    assert "Đã thêm 4 sản phẩm" in r.text and "gắn 1 video" in r.text
+    assert "chưa có link aff" in r.text and "TikTok" in r.text
     with db.get_conn() as conn:
         p = conn.execute("SELECT * FROM products WHERE item_id = '11.22'").fetchone()
         assert (p["name"], p["price"], p["niche"], p["aff_link"]) == ("Bánh tráng trộn", 35000, "Đồ ăn vặt",
@@ -179,7 +182,10 @@ def test_import_excel_for_niche(client):
     # Nhập lại cùng file: cập nhật, không nhân đôi
     r = client.post("/products/import", data={"niche": "Đồ ăn vặt"},
                     files={"file": ("an-vat.xlsx", data, "application/octet-stream")})
-    assert "Đã thêm 0 sản phẩm, cập nhật 3" in r.text
+    assert "Đã thêm 0 sản phẩm, cập nhật 4" in r.text
+    r = client.post("/products/import", data={"niche": "Đồ ăn vặt"},
+                    files={"file": ("x.csv", "Tên,Link aff\nKhông link sp,https://s.shopee.vn/q\n".encode(), "text/csv")})
+    assert "thiếu link sản phẩm" in r.text
 
 
 def test_import_csv_docx_and_text():
@@ -216,10 +222,12 @@ def test_template_download(client):
 
 def test_add_product_with_uploaded_video_then_post_uses_video(client):
     r = client.post("/products/add", data={"niche": "Đồ ăn vặt", "aff_link": "https://s.shopee.vn/zzz",
+                                           "product_link": "https://shopee.vn/Hat-dieu-i.77.88",
                                            "name": "Hạt điều rang muối", "price": "150k"},
                     files={"video_file": ("hat-dieu.mp4", b"fake-mp4-bytes", "video/mp4")})
     assert "Đã thêm 1 sản phẩm" in r.text and "gắn 1 video" in r.text
-    item_id = importer.make_item_id({"aff_link": "https://s.shopee.vn/zzz"})
+    item_id = importer.make_item_id({"product_link": "https://shopee.vn/Hat-dieu-i.77.88"})
+    assert item_id == "77.88"
     with db.get_conn() as conn:
         v = conn.execute("SELECT * FROM videos WHERE item_id = ?", (item_id,)).fetchone()
         assert v["file_path"] and open(v["file_path"], "rb").read() == b"fake-mp4-bytes"
@@ -234,6 +242,7 @@ def test_add_product_with_uploaded_video_then_post_uses_video(client):
                              ).fetchall()
         media = {p["item_id"]: p["media_type"] for p in posts}
         assert media[item_id] == "video" and media["11.22"] == "video" and media["11.33"] == "photo"
+        assert "11.44" not in media                       # chưa có link aff -> không tạo bài
         assert all(p["aff_link"].startswith("https://s.shopee.vn/") for p in posts)
         # Đăng bài video (demo)
         conn.execute("UPDATE posts SET status='approved', scheduled_at=? WHERE page_id=? AND item_id=?",
@@ -338,3 +347,134 @@ def test_facebook_login_flow(monkeypatch):
         r = c.get(f"/auth/facebook/callback?code=other&state={state}")
         assert "không có quyền" in r.text
         assert c.get("/", follow_redirects=False).status_code == 303
+
+
+def test_studio_builds_images_and_video_then_posts_use_them(client):
+    """Studio: ảnh gốc -> 3-5 ảnh 4:5 + video 9:16 cho mỗi phiên bản; bài đăng dùng album / video đó."""
+    from PIL import Image
+
+    from app.services import studio, video_maker
+    with db.get_conn() as conn:
+        item_id = conn.execute("SELECT item_id FROM products WHERE aff_link != '' AND niche = 'Mẹ & bé' "
+                               "AND item_id NOT IN (SELECT item_id FROM videos) LIMIT 1").fetchone()[0]
+    r = client.post(f"/studio/{item_id}/build", data={"new_brief": "1"})   # chạy nền (TestClient chờ xong)
+    assert r.status_code == 200
+    with db.get_conn() as conn:
+        kits = conn.execute("SELECT * FROM media_kits WHERE item_id = ? ORDER BY variant", (item_id,)).fetchall()
+        assert [k["status"] for k in kits] == ["ready", "ready"], [k["error"] for k in kits]
+        imgs = json.loads(kits[0]["images"])
+        assert 3 <= len(imgs) <= 5
+        assert Image.open(imgs[0]).size == (1080, 1350)
+        assert json.loads(kits[1]["images"]) != imgs                 # phiên bản 2 là file khác
+        assert 8 < video_maker.probe_duration(kits[0]["video_path"]) < 16
+        # Sửa chữ -> dựng lại, chữ được giữ
+        client.post(f"/studio/{item_id}/brief", data={"headline": "Tiêu đề mới", "points": "Ý 1\nÝ 2\nÝ 3",
+                                                      "cta": "Mua ngay", "video_lines": "A\nB\nC\nD"})
+        assert studio.get_brief(conn, item_id)["headline"] == "Tiêu đề mới"
+
+        # Tạo bài: sản phẩm có bộ media -> album hoặc video app tạo (tuỳ page)
+        page_ids = [r[0] for r in conn.execute("SELECT id FROM pages WHERE niche = 'Mẹ & bé' AND status = 'active'")]
+        media = {pipeline.pick_media(conn, item_id, pid, "alternate", 0)[0] for pid in page_ids}
+        assert media <= {"album", "kit_video"} and media
+        assert pipeline.pick_media(conn, item_id, page_ids[0], "album")[0] == "album"
+        assert pipeline.pick_media(conn, item_id, page_ids[0], "video")[0] == "kit_video"
+        # Đăng album (demo)
+        kit_id = kits[0]["id"]
+        conn.execute("""INSERT INTO posts(page_id, item_id, caption, media_type, kit_id, aff_link, status, scheduled_at,
+                        created_at, updated_at) VALUES (?, ?, 'x', 'album', ?, 'https://s.shopee.vn/a', 'approved', ?, ?, ?)""",
+                     (page_ids[0], item_id, kit_id, db.now_iso(), db.now_iso(), db.now_iso()))
+        ok, fail = pipeline.publish_due(conn)
+        assert ok >= 1
+    # Trang Studio hiển thị ảnh + video; file media xem được, không lộ file ngoài thư mục
+    html = client.get(f"/studio/{item_id}").text
+    assert "Phiên bản 2" in html and "video.mp4" in html
+    url = html.split('src="/media/m/')[1].split('"')[0]
+    assert client.get("/media/m/" + url).status_code == 200
+    assert client.get("/media/m/../../etc/passwd").status_code == 404
+    assert client.get("/studio?status=ready").status_code == 200
+
+
+def test_album_publish_calls_graph_api(monkeypatch, tmp_path):
+    """Album: tải từng ảnh ở chế độ chưa đăng, rồi 1 bài gắn tất cả ảnh + bình luận link aff."""
+    from app import config
+    monkeypatch.setattr(config, "FB_ENABLED", True)
+    calls = []
+
+    class FakeResp:
+        def __init__(self, data):
+            self.status_code, self._d, self.text = 200, data, ""
+
+        def json(self):
+            return self._d
+
+    class FakeClient:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def post(self, url, data=None, files=None):
+            calls.append(("POST", url.split("/", 4)[-1], dict(data or {}), bool(files)))
+            if url.endswith("/photos"):
+                return FakeResp({"id": f"ph{len(calls)}"})
+            if url.endswith("/feed"):
+                return FakeResp({"id": "page_post1"})
+            return FakeResp({"id": "c1"})
+
+        def get(self, url, params=None):
+            calls.append(("GET", url.split("/", 4)[-1], dict(params or {}), False))
+            return FakeResp({"permalink_url": "/p/1"})
+
+    monkeypatch.setattr(facebook.httpx, "Client", FakeClient)
+    imgs = []
+    for i in range(3):
+        p = tmp_path / f"{i}.jpg"
+        p.write_bytes(b"jpg")
+        imgs.append(str(p))
+    res = facebook.publish({"id": "PAGE", "access_token": "T", "link_mode": "comment"}, "Nội dung", "https://s.shopee.vn/a",
+                           images=imgs)
+    assert res == {"fb_post_id": "page_post1", "permalink": "https://www.facebook.com/p/1"}
+    photos = [c for c in calls if c[1].endswith("PAGE/photos")]
+    assert len(photos) == 3 and all(c[2]["published"] == "false" and c[3] for c in photos)
+    feed = next(c for c in calls if c[1].endswith("PAGE/feed"))
+    assert feed[2]["message"] == "Nội dung" and json.loads(feed[2]["attached_media[2]"]) == {"media_fbid": "ph3"}
+    comment = next(c for c in calls if c[1].endswith("page_post1/comments"))
+    assert "https://s.shopee.vn/a" in comment[2]["message"]
+
+
+def test_brief_uses_claude_vision_with_json_schema(monkeypatch, tmp_path):
+    from types import SimpleNamespace as NS
+
+    from PIL import Image
+
+    from app import config
+    from app.services import creative
+    img = tmp_path / "a.jpg"
+    Image.new("RGB", (1200, 1200), "red").save(img)
+    sent = {}
+
+    class FakeMessages:
+        def create(self, **kw):
+            sent.update(kw)
+            text = json.dumps({"headline": "nồi chiên siêu to khổng lồ dung tích lớn cho cả nhà dùng thoải mái",
+                               "subheadline": "Gọn đẹp", "points": ["ít dầu", "dễ rửa", "", "hẹn giờ", "thêm"],
+                               "cta": "Mua ngay", "badge": "", "image_order": [5, 0, 0], "video_lines": ["A", "B"]})
+            return NS(stop_reason="end_turn", model="claude-opus-5", content=[NS(type="text", text=text)],
+                      usage=NS(input_tokens=1500, output_tokens=300))
+
+    monkeypatch.setattr(config, "AI_ENABLED", True)
+    monkeypatch.setattr(creative, "anthropic", None, raising=False)
+    import anthropic
+    monkeypatch.setattr(anthropic, "Anthropic", lambda **k: NS(messages=FakeMessages()))
+    usage = []
+    brief = creative.make_brief({"name": "Nồi", "price": 100000}, [str(img)], lambda *a: usage.append(a))
+    assert sent["output_config"]["format"]["type"] == "json_schema"
+    assert sent["messages"][0]["content"][1]["type"] == "image"
+    assert len(brief["headline"]) <= 42 and brief["headline"].endswith("…")
+    assert brief["points"] == ["Ít dầu", "Dễ rửa", "Hẹn giờ", "Thêm"]
+    assert brief["image_order"] == [0]                 # chỉ số ảnh sai bị loại, không trùng
+    assert usage == [("claude-opus-5", 1500, 300, False)]

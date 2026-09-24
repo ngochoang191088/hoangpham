@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS products (
     aff_link TEXT NOT NULL DEFAULT '',        -- link aff do người dùng cung cấp
     description TEXT NOT NULL DEFAULT '',     -- mô tả / điểm nổi bật để AI viết bài
     source TEXT NOT NULL DEFAULT 'manual',    -- manual | file | shopee_api
+    sample_caption TEXT NOT NULL DEFAULT '',  -- bài viết thử trong Studio
     score REAL NOT NULL DEFAULT 0,
     blocked INTEGER NOT NULL DEFAULT 0,
     fetched_at TEXT NOT NULL
@@ -47,8 +48,9 @@ CREATE TABLE IF NOT EXISTS posts (
     source TEXT NOT NULL DEFAULT 'app',       -- app | facebook (đăng ngoài app)
     caption TEXT NOT NULL DEFAULT '',
     image_url TEXT NOT NULL DEFAULT '',
-    media_type TEXT NOT NULL DEFAULT 'photo', -- photo | video
+    media_type TEXT NOT NULL DEFAULT 'photo', -- photo | album (bộ ảnh app tạo) | kit_video (video app tạo) | video (video của bạn)
     video_id INTEGER,
+    kit_id INTEGER,
     aff_link TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'pending',   -- pending | approved | rejected | published | failed
     flags TEXT NOT NULL DEFAULT '[]',         -- cảnh báo kiểm duyệt tự động (JSON)
@@ -78,6 +80,33 @@ CREATE TABLE IF NOT EXISTS videos (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_videos_item ON videos(item_id);
+
+CREATE TABLE IF NOT EXISTS product_images (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id TEXT NOT NULL REFERENCES products(item_id) ON DELETE CASCADE,
+    url TEXT NOT NULL DEFAULT '',        -- ảnh gốc (link Shopee / link trong file)
+    file_path TEXT NOT NULL DEFAULT '',  -- bản đã tải về máy chủ
+    position INTEGER NOT NULL DEFAULT 0,
+    source TEXT NOT NULL DEFAULT 'file', -- shopee | file | upload
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_pimg_item ON product_images(item_id, position);
+
+-- Bộ media do app tạo cho 1 sản phẩm: 3-5 ảnh đã chỉnh + 1 video ngắn. Mỗi sản phẩm có thể có
+-- nhiều phiên bản (variant) khác màu / bố cục / thứ tự để các page không đăng ảnh giống hệt nhau.
+CREATE TABLE IF NOT EXISTS media_kits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id TEXT NOT NULL REFERENCES products(item_id) ON DELETE CASCADE,
+    variant INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'processing',  -- processing | ready | error
+    brief TEXT NOT NULL DEFAULT '{}',           -- nội dung chữ trên ảnh/video (JSON)
+    images TEXT NOT NULL DEFAULT '[]',          -- đường dẫn ảnh đã chỉnh (JSON)
+    video_path TEXT NOT NULL DEFAULT '',
+    error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(item_id, variant)
+);
 
 CREATE TABLE IF NOT EXISTS conversions (
     conversion_id TEXT PRIMARY KEY,
@@ -139,6 +168,9 @@ DEFAULT_SETTINGS = {
         "thực phẩm chức năng", "hàng fake", "replica", "super fake", "vape",
     ],
     "disclosure": "#tiepthilienket",
+    # Bộ media app tạo: số phiên bản khác nhau mỗi sản phẩm; cách dùng khi đăng bài
+    "media_variants": 2,
+    "kit_media": "alternate",   # alternate (xen kẽ album ảnh / video) | album | video
 }
 
 
@@ -207,8 +239,8 @@ def init_db() -> None:
 # Cột thêm ở phiên bản sau: tự thêm vào DB cũ khi khởi động
 MIGRATIONS = {
     "products": {"aff_link": "TEXT NOT NULL DEFAULT ''", "description": "TEXT NOT NULL DEFAULT ''",
-                 "source": "TEXT NOT NULL DEFAULT 'manual'"},
-    "posts": {"media_type": "TEXT NOT NULL DEFAULT 'photo'", "video_id": "INTEGER"},
+                 "source": "TEXT NOT NULL DEFAULT 'manual'", "sample_caption": "TEXT NOT NULL DEFAULT ''"},
+    "posts": {"media_type": "TEXT NOT NULL DEFAULT 'photo'", "video_id": "INTEGER", "kit_id": "INTEGER"},
 }
 
 

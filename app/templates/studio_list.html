@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Studio ảnh & video{% endblock %}
+{% block content %}
+<div class="row" style="justify-content: space-between; margin-bottom: 8px">
+  <h1 style="margin:0">Studio ảnh & video</h1>
+  <form method="post" action="/studio/build" class="row">
+    <input type="hidden" name="missing" value="1">
+    <input type="hidden" name="niche" value="{{ niche }}">
+    <button class="primary">🎨 Tạo bộ media cho tất cả sản phẩm chưa có{% if niche %} trong “{{ niche }}”{% endif %}</button>
+  </form>
+</div>
+<p class="muted">Mỗi sản phẩm (theo <b>link sản phẩm</b>): app lấy ảnh gốc từ Shopee, AI xem ảnh và soạn chữ, rồi dựng
+  <b>3-5 ảnh 4:5 đã chỉnh</b> + <b>1 video ngắn 9:16</b>. Mỗi sản phẩm có nhiều phiên bản khác màu / bố cục để các page không đăng ảnh giống hệt nhau.
+  Link aff chỉ được gắn vào bài viết hoặc bình luận.</p>
+
+<div class="row" style="gap:6px; margin-bottom:12px">
+  {% for k, v in {'': 'Tất cả', 'none': 'Chưa tạo', 'processing': 'Đang tạo', 'ready': 'Đã xong', 'error': 'Lỗi'}.items() %}
+    <a class="pill {{ 'published' if status == k else 'niche' }}" href="?status={{ k }}&niche={{ niche | urlencode }}">
+      {{ v }}{% if k %} · {{ stats.get(k, 0) }}{% endif %}</a>
+  {% endfor %}
+</div>
+<form class="filters" method="get">
+  <input type="hidden" name="status" value="{{ status }}">
+  <select name="niche"><option value="">Mọi ngành hàng</option>{% for n in niches %}<option {{ 'selected' if n == niche }}>{{ n }}</option>{% endfor %}</select>
+  <input name="q" value="{{ q }}" placeholder="Tìm sản phẩm…">
+  <button>Lọc</button>
+  <span class="muted small">{{ total | num }} sản phẩm</span>
+</form>
+
+<form id="many" method="post" action="/studio/build"></form>
+<div class="row" style="margin-bottom:10px">
+  <label class="row small"><input type="checkbox" onclick="document.querySelectorAll('.pick').forEach(c => c.checked = this.checked)"> Chọn tất cả</label>
+  <button form="many">Tạo / làm lại cho sản phẩm đã chọn</button>
+</div>
+<div class="grid" style="grid-template-columns: repeat(auto-fill, minmax(230px, 1fr))">
+  {% for r in rows %}
+  {% set imgs = (r.kit_images | loads) if r.kit_images else [] %}
+  <div class="card" style="padding:10px">
+    <a href="/studio/{{ r.item_id | urlencode }}">
+      {% if imgs %}<img src="{{ imgs[0] | media }}" alt="" loading="lazy" style="width:100%; aspect-ratio:4/5; object-fit:cover; border-radius:8px">
+      {% elif r.src_first %}<img src="{{ (r.src_first | media) or r.src_first }}" alt="" loading="lazy" onerror="this.style.visibility='hidden'" style="width:100%; aspect-ratio:4/5; object-fit:contain; background:var(--line); border-radius:8px">
+      {% else %}<div style="aspect-ratio:4/5; background:var(--line); border-radius:8px; display:grid; place-items:center" class="muted small">Chưa có ảnh</div>{% endif %}
+    </a>
+    <div class="row small" style="margin-top:8px; justify-content:space-between">
+      <label class="row"><input class="pick" type="checkbox" form="many" name="ids" value="{{ r.item_id }}">
+        <span class="pill {{ {'ready':'published','processing':'pending','error':'failed'}.get(r.kit_status, 'niche') }}">
+          {{ {'ready':'Đã xong','processing':'Đang tạo…','error':'Lỗi'}.get(r.kit_status, 'Chưa tạo') }}</span></label>
+      <span class="muted">{{ r.n_src }} ảnh gốc{% if r.n_ready %} · {{ r.n_ready }} bản{% endif %}</span>
+    </div>
+    <a href="/studio/{{ r.item_id | urlencode }}" class="small" style="display:block; margin-top:4px"><b>{{ r.name or '(chưa có tên)' }}</b></a>
+    <div class="small muted">{{ r.niche }}{% if not r.aff_link %} · <span class="flag">chưa có link aff</span>{% endif %}</div>
+  </div>
+  {% else %}<p class="muted">Chưa có sản phẩm. Nhập sản phẩm ở trang <a href="/products">Sản phẩm</a>.</p>{% endfor %}
+</div>
+{% set qs = 'niche=' ~ (niche | urlencode) ~ '&status=' ~ status ~ '&q=' ~ (q | urlencode) %}
+<div class="pager">
+  {% if p > 1 %}<a class="btn" href="?{{ qs }}&p={{ p - 1 }}">← Trước</a>{% endif %}
+  <span class="muted small">Trang {{ p }} / {{ ((total + per - 1) // per) or 1 }}</span>
+  {% if p * per < total %}<a class="btn" href="?{{ qs }}&p={{ p + 1 }}">Sau →</a>{% endif %}
+</div>
+{% if stats.get('processing') %}<script>setTimeout(() => location.reload(), 8000)</script>{% endif %}
+{% endblock %}

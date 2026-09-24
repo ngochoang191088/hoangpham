@@ -3,6 +3,7 @@
 Khi chưa cấu hình Facebook App (FB_APP_ID/FB_APP_SECRET) hoặc FB_SYSTEM_USER_TOKEN
 thì mọi hàm chạy ở chế độ DEMO (giả lập kết quả, không gọi Facebook).
 """
+import json
 import random
 import re
 import uuid
@@ -119,10 +120,13 @@ def direct_video_url(url: str) -> str | None:
     return None
 
 
-def publish(page: dict, caption: str, link: str, image_url: str = "", video: dict | None = None) -> dict:
+def publish(page: dict, caption: str, link: str, image_url: str = "", video: dict | None = None,
+            images: list[str] | None = None) -> dict:
     """Đăng bài lên page. Trả về {"fb_post_id", "permalink"}.
 
-    video = {"url": ..., "file_path": ...}: đăng video (ưu tiên). Không có video thì đăng ảnh sản phẩm.
+    video = {"url": ..., "file_path": ...}: đăng video.
+    images = [đường dẫn ảnh trên máy chủ]: đăng 1 bài nhiều ảnh (album 3-5 ảnh app đã thiết kế).
+    Không có video / album thì đăng 1 ảnh sản phẩm (image_url).
     link_mode = "post": link aff nằm trong nội dung bài.
     link_mode = "comment": link aff nằm ở bình luận đầu tiên dưới bài.
     """
@@ -135,6 +139,8 @@ def publish(page: dict, caption: str, link: str, image_url: str = "", video: dic
     token = page["access_token"]
     if video:
         post_id = _upload_video(page["id"], token, message, video)
+    elif images:
+        post_id = _publish_album(page["id"], token, message, images)
     elif image_url:
         data = _request("POST", f"{page['id']}/photos", token, url=image_url, caption=message)
         post_id = data.get("post_id") or data["id"]
@@ -150,6 +156,25 @@ def publish(page: dict, caption: str, link: str, image_url: str = "", video: dic
     if permalink.startswith("/"):
         permalink = "https://www.facebook.com" + permalink
     return {"fb_post_id": post_id, "permalink": permalink}
+
+
+def _publish_album(page_id: str, token: str, message: str, images: list[str]) -> str:
+    """Bài nhiều ảnh: tải từng ảnh lên ở chế độ chưa đăng, rồi đăng 1 bài gắn tất cả ảnh."""
+    media_ids = []
+    with httpx.Client(timeout=120) as client:
+        for path in images:
+            with open(path, "rb") as fh:
+                resp = client.post(_url(f"{page_id}/photos"), data={"access_token": token, "published": "false"},
+                                   files={"source": (Path(path).name, fh, "image/jpeg")})
+            data = resp.json()
+            if resp.status_code >= 400 or "error" in data:
+                err = data.get("error", {})
+                raise FacebookError(f"Tải ảnh lỗi {err.get('code', resp.status_code)}: {err.get('message', resp.text)}")
+            media_ids.append(data["id"])
+    params = {"message": message}
+    for i, media_id in enumerate(media_ids):
+        params[f"attached_media[{i}]"] = json.dumps({"media_fbid": media_id})
+    return _request("POST", f"{page_id}/feed", token, **params)["id"]
 
 
 def _upload_video(page_id: str, token: str, message: str, video: dict) -> str:

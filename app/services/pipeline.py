@@ -3,6 +3,7 @@
 Chạy bằng cron (xem README) hoặc bấm nút trong trang Cài đặt.
 """
 import json
+import zlib
 from datetime import datetime, timedelta
 
 from app import config, db
@@ -106,10 +107,7 @@ def generate_drafts(conn, day: datetime | None = None) -> int:
         jobs += [(page, p, when) for p, when in zip(chosen, _slots(day, s["post_hours"], len(chosen), idx * 7))]
 
     # Bước 2: AI viết toàn bộ caption một lần (Batch API khi số lượng lớn)
-    def record_usage(model, tin, tout, batch):
-        conn.execute("INSERT INTO ai_usage(ts, model, input_tokens, output_tokens, batch) VALUES (?, ?, ?, ?, ?)",
-                     (db.now_iso(), model, tin, tout, int(batch)))
-
+    record_usage = usage_recorder(conn)
     captions = ai_writer.write_captions(
         [{"page": dict(pg), "product": dict(p)} for pg, p, _ in jobs], s["disclosure"], record_usage)
 
@@ -123,16 +121,16 @@ def generate_drafts(conn, day: datetime | None = None) -> int:
         flags = ai_writer.check_content(caption, s, day_captions.get(p["item_id"], []))
         day_captions.setdefault(p["item_id"], []).append(caption)
         status = "approved" if page["auto_approve"] and not flags else "pending"
-        video = pick_video(conn, p["item_id"], page["id"])
-        if not video and not p["image_url"]:
-            flags.append("Sản phẩm chưa có ảnh hoặc video")
+        media_type, video_id, kit_id = pick_media(conn, p["item_id"], page["id"], s.get("kit_media", "alternate"),
+                                                  created)
+        if media_type == "photo" and not p["image_url"]:
+            flags.append("Sản phẩm chưa có ảnh / video, hãy tạo bộ media trong Studio")
         now = db.now_iso()
         cur = conn.execute(
-            """INSERT INTO posts(page_id, item_id, caption, image_url, media_type, video_id, status, flags,
-                   scheduled_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (page["id"], p["item_id"], caption, p["image_url"], "video" if video else "photo",
-             video["id"] if video else None, status, json.dumps(flags, ensure_ascii=False),
-             when.isoformat(), now, now),
+            """INSERT INTO posts(page_id, item_id, caption, image_url, media_type, video_id, kit_id, status, flags,
+                   scheduled_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (page["id"], p["item_id"], caption, p["image_url"], media_type, video_id, kit_id, status,
+             json.dumps(flags, ensure_ascii=False), when.isoformat(), now, now),
         )
         post_id = cur.lastrowid
         link = p["aff_link"]
@@ -146,6 +144,42 @@ def generate_drafts(conn, day: datetime | None = None) -> int:
 
     db.log(conn, "info", f"Đã tạo {created} bài nháp cho ngày {day_str}")
     return created
+
+
+def usage_recorder(conn):
+    """Hàm ghi lại token Claude đã dùng (để tính chi phí thật)."""
+    def record(model, tin, tout, batch):
+        conn.execute("INSERT INTO ai_usage(ts, model, input_tokens, output_tokens, batch) VALUES (?, ?, ?, ?, ?)",
+                     (db.now_iso(), model, tin, tout, int(batch)))
+    return record
+
+
+def build_media(conn, limit: int = 30) -> int:
+    """Tạo bộ ảnh + video cho sản phẩm chưa có (chạy trước khi tạo bài nháp)."""
+    from app.services import studio
+
+    return studio.build_missing(conn, limit, usage_recorder(conn))
+
+
+def pick_media(conn, item_id: str, page_id: str, kit_media: str = "alternate", seq: int = 0):
+    """Chọn nội dung đăng cho 1 bài. Trả về (media_type, video_id, kit_id).
+
+    1. Video riêng bạn cung cấp (chưa đăng trên page này) -> "video".
+    2. Bộ media app tạo: mỗi page dùng 1 phiên bản cố định (khác màu/bố cục với page khác);
+       đăng album 3-5 ảnh hoặc video ngắn (xen kẽ theo cài đặt).
+    3. Không có gì -> 1 ảnh sản phẩm ("photo").
+    """
+    video = pick_video(conn, item_id, page_id)
+    if video:
+        return "video", video["id"], None
+    kits = conn.execute("SELECT id, video_path FROM media_kits WHERE item_id = ? AND status = 'ready' ORDER BY variant",
+                        (item_id,)).fetchall()
+    if kits:
+        kit = kits[zlib.crc32(page_id.encode()) % len(kits)]
+        if kit_media == "video" or (kit_media == "alternate" and (seq + zlib.crc32(page_id.encode())) % 2):
+            return ("kit_video", None, kit["id"]) if kit["video_path"] else ("album", None, kit["id"])
+        return "album", None, kit["id"]
+    return "photo", None, None
 
 
 def pick_video(conn, item_id: str, page_id: str):
@@ -179,11 +213,18 @@ def publish_due(conn) -> tuple[int, int]:
             fail += 1
             continue
         page = {"id": r["page_id"], "access_token": r["access_token"], "link_mode": r["link_mode"]}
-        video = conn.execute("SELECT * FROM videos WHERE id = ?", (r["video_id"],)).fetchone() \
-            if r["media_type"] == "video" and r["video_id"] else None
+        video, images = None, None
+        if r["media_type"] == "video" and r["video_id"]:
+            row = conn.execute("SELECT * FROM videos WHERE id = ?", (r["video_id"],)).fetchone()
+            video = dict(row) if row else None
+        elif r["media_type"] in ("album", "kit_video") and r["kit_id"]:
+            kit = conn.execute("SELECT * FROM media_kits WHERE id = ? AND status = 'ready'", (r["kit_id"],)).fetchone()
+            if kit and r["media_type"] == "kit_video":
+                video = {"file_path": kit["video_path"]}
+            elif kit:
+                images = json.loads(kit["images"])
         try:
-            res = facebook.publish(page, r["caption"], r["aff_link"], r["image_url"],
-                                   dict(video) if video else None)
+            res = facebook.publish(page, r["caption"], r["aff_link"], r["image_url"], video, images)
         except Exception as e:  # noqa: BLE001
             conn.execute("UPDATE posts SET status='failed', error=?, updated_at=? WHERE id=?",
                          (str(e)[:500], db.now_iso(), r["id"]))

@@ -5,19 +5,21 @@ nhập sản phẩm + link aff + video cho từng ngành, 30 ngày lịch sử b
 """
 import json
 import random
+import shutil
 from datetime import timedelta
 from pathlib import Path
 
 from app import config, db
-from app.services import ai_writer, catalog, facebook, pipeline, shopee
+from app.services import ai_writer, catalog, facebook, pipeline, shopee, studio
 
 DESCS = ["chất liệu bền, dễ vệ sinh", "thiết kế nhỏ gọn, tiện mang theo", "nhiều màu để chọn",
          "bảo hành 12 tháng", "freeship đơn từ 0đ", "phù hợp làm quà tặng"]
 TONES = ["thân thiện, gần gũi", "vui nhộn, trẻ trung", "ngắn gọn, thực tế", "nhẹ nhàng, tinh tế"]
 
 
-def seed(n_pages: int = 82, days: int = 30) -> None:
+def seed(n_pages: int = 82, days: int = 30, kit_niches: int = 8) -> None:
     Path(config.DB_PATH).unlink(missing_ok=True)
+    shutil.rmtree(config.MEDIA_DIR, ignore_errors=True)
     db.init_db()
     rnd = random.Random(42)
     with db.get_conn() as conn:
@@ -46,8 +48,8 @@ def seed(n_pages: int = 82, days: int = 30) -> None:
                     rows.append({
                         "name": p["name"], "product_link": p["product_link"],
                         "aff_link": f"https://s.shopee.vn/demo{p['item_id'][-6:]}", "price": p["price"],
-                        "description": f"{kw.capitalize()} {rnd.choice(DESCS)}", "image_url": p["image_url"],
-                        "video_url": f"https://videos.example.com/demo/{p['item_id']}.mp4" if rnd.random() < 0.4 else "",
+                        "description": f"{kw.capitalize()} {rnd.choice(DESCS)}", "image_url": "",
+                        "video_url": f"https://videos.example.com/demo/{p['item_id']}.mp4" if rnd.random() < 0.1 else "",
                     })
             catalog.save_rows(conn, rows, niche)
         for item_id, in conn.execute("SELECT item_id FROM products").fetchall():
@@ -99,6 +101,12 @@ def seed(n_pages: int = 82, days: int = 30) -> None:
                              commission / orders, (when + timedelta(hours=rnd.randint(0, 20))).isoformat()),
                         )
         # Bài hôm nay: một phần đã đăng, phần còn lại chờ duyệt / đã duyệt
+        # Studio: tạo sẵn bộ ảnh + video cho vài sản phẩm mỗi ngành (demo dùng ảnh giả lập)
+        for niche in list(db.DEFAULT_NICHES)[:kit_niches]:
+            row = conn.execute("""SELECT item_id FROM products WHERE niche = ? AND item_id NOT IN
+                                  (SELECT item_id FROM videos) ORDER BY score DESC LIMIT 1""", (niche,)).fetchone()
+            if row:
+                studio.build_all_variants(conn, row[0])
         pipeline.generate_drafts(conn, db.now())
         conn.execute("UPDATE posts SET status = 'approved' WHERE status = 'pending' AND id % 3 != 0")
         pipeline.publish_due(conn)

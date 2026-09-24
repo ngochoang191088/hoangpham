@@ -1,7 +1,7 @@
 """Đọc danh sách sản phẩm + link aff + video từ file Excel (.xlsx), CSV, Word (.docx) hoặc text.
 
 Mỗi ngành hàng dùng 1 file riêng. Cột được nhận diện theo tên (không phân biệt hoa thường, có dấu hay không):
-    Tên sản phẩm | Link sản phẩm | Link aff | Giá | Mô tả | Link ảnh | Link video
+    Tên sản phẩm | Link sản phẩm (bắt buộc) | Link aff | Giá | Mô tả | Link ảnh (nhiều link) | Link video
 
 Nếu file không có dòng tiêu đề, app tự nhận diện theo nội dung từng ô:
 link shopee.vn/... là link sản phẩm, s.shopee.vn / shope.ee là link aff, link .mp4 / Google Drive là video.
@@ -32,6 +32,7 @@ _HEADER_RULES = [
 ]
 
 URL_RE = re.compile(r"https?://\S+")
+URL_LIST_RE = re.compile(r"https?://[^\s,;|]+")
 
 
 def strip_accents(text: str) -> str:
@@ -101,6 +102,11 @@ def _rows_from_table(table: list[list]) -> list[dict]:
                     field = "description"
             if field == "description" and row.get("description"):
                 row["description"] += "\n" + text
+            elif field == "image_url":
+                # 1 ô có thể chứa nhiều link ảnh; nhiều cột "Ảnh 1, Ảnh 2..." cũng được
+                row.setdefault("images", []).extend(URL_LIST_RE.findall(text))
+                if row["images"]:
+                    row.setdefault("image_url", row["images"][0])
             elif field and field not in row:
                 row[field] = cell if field == "price" else text
         if row:
@@ -158,16 +164,18 @@ def item_id_from_link(link: str) -> str | None:
 
 
 def make_item_id(row: dict) -> str:
-    link = row.get("product_link") or row.get("aff_link") or row.get("name", "")
+    link = row.get("product_link") or row.get("name", "")
     return item_id_from_link(link) or "u" + hashlib.md5(link.strip().lower().encode()).hexdigest()[:12]
 
 
 def validate(row: dict) -> str | None:
-    """Trả về lỗi nếu dòng thiếu dữ liệu bắt buộc."""
-    if not (row.get("product_link") or row.get("aff_link")):
-        return "thiếu link sản phẩm / link aff"
-    if not row.get("aff_link"):
-        return "thiếu link aff"
+    """Trả về lỗi nếu dòng thiếu dữ liệu bắt buộc.
+
+    Sản phẩm được xác định bằng LINK SẢN PHẨM (ảnh, tên lấy từ đây). Link aff chỉ để gắn vào bài / bình luận,
+    thiếu link aff vẫn lưu sản phẩm nhưng chưa tạo bài được.
+    """
+    if not row.get("product_link"):
+        return "thiếu link sản phẩm"
     return None
 
 
@@ -184,7 +192,7 @@ def template_xlsx(niche: str) -> bytes:
     ws.append(headers)
     ws.append(["Nồi chiên không dầu 5L", "https://shopee.vn/Noi-chien-khong-dau-5L-i.123456.7890123",
                "https://s.shopee.vn/AbCdEf", 899000, "Dung tích 5L, hẹn giờ 60 phút, lòng chống dính",
-               "https://down-vn.img.susercontent.com/file/anh-san-pham.jpg",
+               "https://down-vn.img.susercontent.com/file/anh-1.jpg\nhttps://down-vn.img.susercontent.com/file/anh-2.jpg",
                "https://drive.google.com/file/d/ID_VIDEO/view"])
     for cell in ws[1]:
         cell.font = Font(bold=True, color="FFFFFF")
@@ -193,9 +201,10 @@ def template_xlsx(niche: str) -> bytes:
         ws.column_dimensions[col].width = width
     note = wb.create_sheet("Huong dan")
     for line in [
-        "Mỗi dòng là 1 sản phẩm. Bắt buộc: Link aff. Nên có: Tên sản phẩm, Link sản phẩm, Giá, Mô tả, Link ảnh.",
-        "Link video (không bắt buộc): link .mp4 trực tiếp hoặc Google Drive (chia sẻ: Bất kỳ ai có đường liên kết).",
-        "Có video thì app đăng video; không có video thì đăng ảnh sản phẩm.",
+        "Mỗi dòng là 1 sản phẩm. Bắt buộc: Link sản phẩm (app lấy ảnh, tên từ đây). Link aff: gắn vào bài / bình luận.",
+        "Link ảnh (không bắt buộc): nhiều link trong 1 ô (mỗi link 1 dòng). Bỏ trống: app tự lấy ảnh từ link Shopee.",
+        "App tự chỉnh 3-5 ảnh cho đẹp và làm 1 video ngắn cho mỗi sản phẩm (trang Studio).",
+        "Link video (không bắt buộc): video của bạn, link .mp4 hoặc Google Drive (chia sẻ: Bất kỳ ai có đường liên kết).",
         "Một sản phẩm có nhiều video: thêm nhiều dòng cùng Link aff, mỗi dòng 1 link video.",
         "Chỉ dùng video/ảnh bạn có quyền sử dụng.",
     ]:

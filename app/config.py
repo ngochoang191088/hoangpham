@@ -43,6 +43,8 @@ USD_VND = float(os.getenv("USD_VND", "26000"))
 
 DB_PATH = os.getenv("DB_PATH", "data/app.db")
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "data/uploads")
+MEDIA_DIR = os.getenv("MEDIA_DIR", "data/media")      # ảnh gốc tải về + ảnh/video app tạo
+MUSIC_DIR = os.getenv("MUSIC_DIR", "data/music")      # nhạc nền (mp3) bạn có quyền sử dụng, tuỳ chọn
 SECRET_KEY = os.getenv("SECRET_KEY", "doi-chuoi-bi-mat-nay")
 # Chỉ các tài khoản Facebook này được đăng nhập (ID, cách nhau dấu phẩy).
 # Để trống: người đăng nhập đầu tiên thành chủ app, người khác bị chặn.

@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}Studio · {{ product.name }}{% endblock %}
+{% block content %}
+{% set processing = kits | selectattr('status', 'equalto', 'processing') | list %}
+<a class="small" href="/studio?niche={{ product.niche | urlencode }}">← Studio</a>
+<div class="row" style="justify-content: space-between; margin: 4px 0 12px">
+  <div>
+    <h1 style="margin:0">{{ product.name or '(chưa có tên)' }}</h1>
+    <div class="row small" style="margin-top:4px">
+      <span class="pill niche">{{ product.niche }}</span>
+      {% if product.price %}<span>{{ product.price | vnd }}</span>{% endif %}
+      {% if product.product_link %}<a href="{{ product.product_link }}" target="_blank" rel="noopener">Link sản phẩm ↗</a>{% endif %}
+      {% if product.aff_link %}<span class="muted">Link aff (gắn vào bài/bình luận): {{ product.aff_link }}</span>
+      {% else %}<span class="flag">Chưa có link aff: chưa tạo bài được</span>{% endif %}
+    </div>
+  </div>
+  <div class="row">
+    <form class="inline" method="post" action="/studio/{{ product.item_id | urlencode }}/build">
+      <button {{ 'disabled' if processing }}>↻ Dựng lại (giữ nội dung chữ)</button></form>
+    <form class="inline" method="post" action="/studio/{{ product.item_id | urlencode }}/build">
+      <input type="hidden" name="new_brief" value="1">
+      <button class="primary" {{ 'disabled' if processing }}>✨ AI tạo mới bộ ảnh + video</button></form>
+  </div>
+</div>
+{% if processing %}<div class="alert warn">Đang tạo bộ media… trang tự tải lại.</div>
+<script>setTimeout(() => location.reload(), 5000)</script>{% endif %}
+
+<div class="grid two" style="margin-bottom:16px">
+  <div class="card">
+    <h2>Ảnh gốc ({{ images | length }})</h2>
+    <p class="muted small">Lấy từ link Shopee / file Excel / bạn tải lên. AI chọn ảnh đẹp nhất làm ảnh bìa; bạn có thể xoá ảnh xấu, đưa ảnh lên đầu.</p>
+    <div class="grid" style="grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap:10px">
+      {% for img in images %}
+      <div>
+        <img src="{{ (img.file_path | media) or img.url }}" alt="" loading="lazy" onerror="this.style.visibility='hidden'"
+             style="width:100%; aspect-ratio:1; object-fit:cover; border-radius:8px; background:var(--line)">
+        <div class="row small" style="gap:4px; margin-top:4px">
+          <span class="muted">#{{ loop.index0 }} · {{ {'shopee':'Shopee','file':'File','upload':'Tải lên'}.get(img.source, img.source) }}</span>
+          {% if not loop.first %}<form class="inline" method="post" action="/studio/images/{{ img.id }}/first"><button class="small" style="padding:0 6px" title="Đưa lên đầu">⤒</button></form>{% endif %}
+          <form class="inline" method="post" action="/studio/images/{{ img.id }}/delete"><button class="small" style="padding:0 6px" title="Xoá">✕</button></form>
+        </div>
+      </div>
+      {% else %}<p class="muted small">Chưa có ảnh gốc.</p>{% endfor %}
+    </div>
+    <form method="post" action="/studio/{{ product.item_id | urlencode }}/images" enctype="multipart/form-data" class="form-grid" style="grid-template-columns:1fr; margin-top:12px">
+      <label>Dán link ảnh (mỗi link 1 dòng)<textarea name="urls" style="min-height:60px"></textarea></label>
+      <label>Hoặc tải ảnh lên<input type="file" name="files" multiple accept="image/jpeg,image/png,image/webp"></label>
+      <div class="row"><button>Thêm ảnh</button>
+        {% if product.product_link %}<button name="fetch" value="1">⟳ Lấy ảnh từ link Shopee</button>{% endif %}</div>
+    </form>
+    {% if videos %}<p class="small" style="margin-top:12px">🎬 Sản phẩm có {{ videos | length }} video riêng của bạn (ưu tiên đăng trước bộ media).</p>{% endif %}
+  </div>
+
+  <div class="card">
+    <h2>Chữ trên ảnh & video</h2>
+    {% if brief %}
+    <form method="post" action="/studio/{{ product.item_id | urlencode }}/brief" class="form-grid" style="grid-template-columns:1fr">
+      <label>Tiêu đề ảnh bìa<input name="headline" value="{{ brief.headline }}" maxlength="42"></label>
+      <label>Dòng phụ<input name="subheadline" value="{{ brief.subheadline }}" maxlength="52"></label>
+      <label>Điểm nổi bật (mỗi dòng 1 ý, mỗi ý = 1 ảnh)<textarea name="points" style="min-height:90px">{{ brief.points | join('\n') }}</textarea></label>
+      <label>Lời kêu gọi<input name="cta" value="{{ brief.cta }}" maxlength="40"></label>
+      <label>Nhãn (để trống nếu không có)<input name="badge" value="{{ brief.badge }}" maxlength="16"></label>
+      <label>Chữ trong video (mỗi dòng 1 cảnh)<textarea name="video_lines" style="min-height:90px">{{ brief.video_lines | join('\n') }}</textarea></label>
+      <label>Thứ tự ảnh gốc (số #, cách nhau dấu phẩy)<input name="image_order" value="{{ brief.image_order | join(', ') }}"></label>
+      <button class="primary" {{ 'disabled' if processing }}>Lưu & dựng lại</button>
+    </form>
+    {% else %}<p class="muted">Chưa có. Bấm <b>✨ AI tạo mới bộ ảnh + video</b>: AI xem ảnh gốc + thông tin sản phẩm để soạn chữ.</p>{% endif %}
+  </div>
+</div>
+
+{% for kit in kits %}
+<div class="card" style="margin-bottom:16px">
+  <div class="row" style="justify-content: space-between">
+    <h2 style="margin:0">Phiên bản {{ kit.variant + 1 }}
+      <span class="pill {{ {'ready':'published','processing':'pending','error':'failed'}[kit.status] }}">{{ {'ready':'Đã xong','processing':'Đang tạo…','error':'Lỗi'}[kit.status] }}</span></h2>
+    <span class="small muted">Các page trong ngành được chia đều giữa các phiên bản · cập nhật {{ kit.updated_at[:16].replace('T', ' ') }}</span>
+  </div>
+  {% if kit.error %}<div class="alert error" style="margin-top:8px">{{ kit.error }}</div>{% endif %}
+  {% if kit.status == 'ready' %}
+  <div class="row" style="align-items:flex-start; gap:12px; margin-top:12px; overflow-x:auto; flex-wrap:nowrap">
+    {% for path in kit.images | loads %}
+      <a href="{{ path | media }}" target="_blank"><img src="{{ path | media }}" alt="" loading="lazy" style="height:300px; aspect-ratio:4/5; border-radius:8px; border:1px solid var(--line)"></a>
+    {% endfor %}
+    {% if kit.video_path %}
+      {% set story = kit.video_path | replace('video.mp4', 'story_1.jpg') %}
+      <video src="{{ kit.video_path | media }}" poster="{{ story | media }}" controls preload="none" style="height:300px; aspect-ratio:9/16; border-radius:8px; background:#000"></video>
+    {% endif %}
+  </div>
+  <div class="row small" style="margin-top:8px">
+    {% for path in kit.images | loads %}<a href="{{ path | media }}" download>⬇ Ảnh {{ loop.index }}</a>{% endfor %}
+    {% if kit.video_path %}<a href="{{ kit.video_path | media }}" download>⬇ Video</a>{% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endfor %}
+
+<div class="card" id="bai-viet">
+  <div class="row" style="justify-content: space-between">
+    <h2 style="margin:0">Bài viết</h2>
+    <form class="inline" method="post" action="/studio/{{ product.item_id | urlencode }}/caption"><button>✍ AI viết thử bài đăng</button></form>
+  </div>
+  <p class="muted small">Khi tạo bài hằng ngày, AI viết riêng cho từng page theo giọng văn của page. Bài đăng kèm album ảnh hoặc video ở trên, link aff trong bài hoặc bình luận đầu.
+    Đã đăng: {{ used.get('album', 0) }} album · {{ used.get('kit_video', 0) }} video app tạo · {{ used.get('video', 0) }} video riêng · {{ used.get('photo', 0) }} ảnh đơn.</p>
+  {% if product.sample_caption %}<div class="caption" style="white-space:pre-wrap; background:var(--bg); padding:12px; border-radius:8px">{{ product.sample_caption }}</div>{% endif %}
+</div>
+{% endblock %}

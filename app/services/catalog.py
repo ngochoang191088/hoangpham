@@ -66,6 +66,10 @@ def save_rows(conn, rows: list[dict], niche: str, source: str = "file") -> dict:
             added += 1
         if not data["name"]:
             errors.append(f"Dòng {i}: chưa có tên sản phẩm, hãy bổ sung trong trang Sản phẩm")
+        if not data["aff_link"] and not (exists and exists["aff_link"]):
+            errors.append(f"Dòng {i}: chưa có link aff (lưu sản phẩm nhưng chưa tạo bài được)")
+        for url in row.get("images", []):
+            add_image(conn, item_id, url=url, source="file")
 
         if row.get("video_url"):
             if not facebook.direct_video_url(row["video_url"]):
@@ -73,6 +77,19 @@ def save_rows(conn, rows: list[dict], niche: str, source: str = "file") -> dict:
             elif add_video(conn, item_id, url=row["video_url"]):
                 videos += 1
     return {"added": added, "updated": updated, "videos": videos, "errors": errors}
+
+
+def add_image(conn, item_id: str, url: str = "", file_path: str = "", source: str = "file") -> bool:
+    """Thêm ảnh gốc cho sản phẩm (bỏ qua nếu trùng), tối đa 10 ảnh."""
+    if conn.execute("SELECT 1 FROM product_images WHERE item_id = ? AND url = ? AND file_path = ?",
+                    (item_id, url, file_path)).fetchone():
+        return False
+    n = conn.execute("SELECT COUNT(*) FROM product_images WHERE item_id = ?", (item_id,)).fetchone()[0]
+    if n >= 10:
+        return False
+    conn.execute("INSERT INTO product_images(item_id, url, file_path, position, source, created_at) "
+                 "VALUES (?, ?, ?, ?, ?, ?)", (item_id, url, file_path, n, source, db.now_iso()))
+    return True
 
 
 def add_video(conn, item_id: str, url: str = "", file_path: str = "", title: str = "") -> bool:

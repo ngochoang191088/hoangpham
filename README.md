@@ -10,25 +10,36 @@ AI viết bài, app tự đăng **video** (nếu sản phẩm có video) hoặc 
    bấm *Nhận diện lại page từ Facebook* hoặc đăng nhập lại.
 2. **Chọn ngành hàng cho page** (trang *Page → Chưa chọn ngành hàng*): tick nhiều page rồi áp 1 ngành,
    hoặc chọn ngay trên từng dòng. Danh sách ngành hàng sửa ở trang *Ngành hàng* (mặc định 16 ngành, mục tiêu 5 page/ngành).
-3. **Nhập sản phẩm cho từng ngành** (trang *Sản phẩm & video*): mỗi ngành 1 file Excel riêng
+3. **Nhập sản phẩm cho từng ngành** (trang *Sản phẩm*): mỗi ngành 1 file Excel riêng
    (`.xlsx`, `.csv`, `.docx`, `.txt`), hoặc thêm từng sản phẩm. Tải file mẫu ngay trong app.
 
-   | Tên sản phẩm | Link sản phẩm | **Link aff** (bắt buộc) | Giá | Mô tả | Link ảnh | Link video |
+   | Tên sản phẩm | **Link sản phẩm** (bắt buộc) | Link aff | Giá | Mô tả | Link ảnh (nhiều link) | Link video |
    |---|---|---|---|---|---|---|
 
-   - **Có link video** (`.mp4` trực tiếp hoặc Google Drive chia sẻ công khai) hoặc tải file video lên app → **đăng video**.
-   - **Không có video** → đăng **ảnh sản phẩm** (cột Link ảnh).
-   - Một sản phẩm nhiều video: thêm nhiều dòng cùng link aff. Mỗi video không đăng lặp lại trên cùng 1 page.
+   - Sản phẩm được xác định bằng **link sản phẩm** (ảnh, tên lấy từ đây). **Link aff chỉ gắn vào bài hoặc bình luận.**
    - Thiếu tên sản phẩm: app lấy tạm từ link Shopee (hoặc lấy đủ tên/giá/ảnh nếu có Shopee Open API).
-4. **AI viết bài** cho từng page, dựa trên tên, giá, mô tả bạn cung cấp, theo giọng văn của page.
+   - Video riêng của bạn (không bắt buộc): link `.mp4` / Google Drive hoặc tải file lên → được ưu tiên đăng.
+4. **Studio ảnh & video** (tự động cho mỗi sản phẩm):
+   - Lấy **ảnh gốc** từ link Shopee (hoặc link ảnh trong file Excel / ảnh bạn tải lên), tải về máy chủ.
+   - **AI (Claude) xem ảnh** + thông tin sản phẩm: chọn ảnh đẹp nhất làm bìa, bỏ ảnh xấu / bảng size,
+     soạn tiêu đề, 3-4 điểm nổi bật, lời kêu gọi, chữ cho video (chỉ dựa trên thông tin có thật).
+   - App **chỉnh ảnh** (cân bằng sáng, tương phản, độ nét, phóng to ảnh nhỏ) và **thiết kế 3-5 ảnh 4:5**
+     (ảnh bìa có giá, ảnh điểm nổi bật, ảnh kêu gọi mua) + **1 video ngắn 9:16** (10-15 giây, chuyển cảnh,
+     nhạc nền tuỳ chọn trong `data/music/`).
+   - Mỗi sản phẩm có **nhiều phiên bản** khác màu / bố cục / ảnh bìa; mỗi page dùng 1 phiên bản riêng để
+     các page không đăng ảnh giống hệt nhau. Bạn sửa được chữ trên ảnh rồi bấm *Lưu & dựng lại*.
+   - Bài đăng dùng **album 3-5 ảnh** hoặc **video ngắn** (xen kẽ, đổi trong *Cài đặt*).
+5. **AI viết bài** cho từng page, dựa trên tên, giá, mô tả bạn cung cấp, theo giọng văn của page.
    Nội dung được kiểm duyệt tự động (từ cấm, câu gây hiểu lầm, trùng lặp giữa các page).
-5. **Bạn duyệt** ở trang *Duyệt bài* (1 nút duyệt tất cả bài sạch), app **tự đăng** đúng giờ,
+6. **Bạn duyệt** ở trang *Duyệt bài* (1 nút duyệt tất cả bài sạch), app **tự đăng** đúng giờ,
    link aff đặt trong bài hoặc ở bình luận đầu tiên.
-6. **Theo dõi** ở *Tổng quan*: tương tác, hoa hồng theo page / ngành / sản phẩm; cảnh báo page bị hạn chế,
+7. **Theo dõi** ở *Tổng quan*: tương tác, hoa hồng theo page / ngành / sản phẩm; cảnh báo page bị hạn chế,
    mất quyền, ngành chưa có sản phẩm, bài lỗi. Có **nút dừng khẩn cấp** toàn bộ.
 
-| Chọn ngành hàng cho page | Sản phẩm, link aff & video |
+| Studio: ảnh gốc → 3-5 ảnh đã thiết kế + video | Bộ ảnh mẫu (3 phiên bản khác nhau) |
 |---|---|
+| ![](docs/studio.png) | ![](docs/studio_sheet.jpg) |
+| **Chọn ngành hàng cho page** | **Sản phẩm, link aff & video** |
 | ![](docs/pages_unassigned.png) | ![](docs/products.png) |
 | **Tổng quan** | **Ngành hàng** |
 | ![](docs/dashboard.png) | ![](docs/niches.png) |
@@ -85,6 +96,8 @@ và đồng bộ hoa hồng thật. Không bắt buộc: bạn tự nhập link 
 ### 4. Chạy tự động (cron trên VPS)
 
 ```cron
+# Tạo bộ ảnh + video cho sản phẩm mới (30 sản phẩm/lần, ~10-20 giây/sản phẩm), mỗi giờ từ 0h-5h
+0 0-5 * * *  cd /opt/aff-pages && python -m app.jobs media
 # AI viết bài cho ngày mai lúc 6h sáng (bạn duyệt trong ngày)
 0 6 * * *    cd /opt/aff-pages && python -m app.jobs drafts
 # Đăng bài đến giờ, 5 phút một lần
@@ -96,7 +109,12 @@ và đồng bộ hoa hồng thật. Không bắt buộc: bạn tự nhập link 
 ```
 
 Web app: `uvicorn app.main:app --host 127.0.0.1 --port 8000` đặt sau Nginx + HTTPS (Facebook Login bắt buộc HTTPS).
-Video tải lên được lưu trong `data/uploads/`, nên để ổ đĩa VPS đủ lớn (video 50–100 MB/cái).
+Video tải lên nằm trong `data/uploads/`, ảnh/video app tạo nằm trong `data/media/` (mỗi sản phẩm ~3-5 MB mỗi phiên bản),
+nên để ổ đĩa VPS đủ lớn. ffmpeg đã có sẵn qua thư viện `imageio-ffmpeg`, không cần cài thêm.
+
+> Lấy ảnh từ link Shopee: Shopee hay chặn truy cập tự động từ máy chủ, nên có sản phẩm sẽ không tự lấy được ảnh.
+> Khi đó dán link ảnh vào cột *Link ảnh* của file Excel (mỗi ô nhiều link) hoặc tải ảnh lên trong Studio.
+> Chỉ dùng ảnh / video / nhạc bạn có quyền sử dụng.
 
 ## Chi phí mỗi tháng (ước tính, 3 bài/page/ngày, dùng Batch API)
 
@@ -122,6 +140,10 @@ app/
     importer.py        đọc file Excel / CSV / Word / text, file mẫu
     catalog.py         kho sản phẩm + video theo ngành hàng
     ai_writer.py       viết caption (Claude, Batch API) + kiểm duyệt
+    studio.py          lấy ảnh gốc → AI soạn chữ → dựng ảnh + video, nhiều phiên bản
+    creative.py        Claude xem ảnh, soạn chữ trên ảnh / video (JSON)
+    designer.py        chỉnh ảnh + thiết kế ảnh 4:5 và khung 9:16 (Pillow, font Be Vietnam Pro)
+    video_maker.py     dựng video ngắn (ffmpeg)
     pipeline.py        nhận diện page → tạo bài → đăng → đồng bộ số liệu
     shopee.py          (tuỳ chọn) Shopee Affiliate Open API
     costs.py           ước tính chi phí

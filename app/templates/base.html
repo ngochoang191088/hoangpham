@@ -19,10 +19,11 @@
     <a class="item {{ 'on' if path.startswith('/pages') }}" href="/pages">Page {% if unassigned_count %}<span class="badge" title="Page chưa chọn ngành hàng">{{ unassigned_count }}</span>{% endif %}</a>
     <a class="item {{ 'on' if path.startswith('/review') }}" href="/review">Duyệt bài {% if pending_count %}<span class="badge">{{ pending_count }}</span>{% endif %}</a>
     <a class="item {{ 'on' if path.startswith('/posts') }}" href="/posts">Bài đăng</a>
-    <a class="item {{ 'on' if path.startswith('/products') }}" href="/products">Sản phẩm & video</a>
+    <a class="item {{ 'on' if path.startswith('/products') }}" href="/products">Sản phẩm</a>
+    <a class="item {{ 'on' if path.startswith('/studio') }}" href="/studio">Studio</a>
     <a class="item {{ 'on' if path.startswith('/settings') }}" href="/settings">Cài đặt</a>
     <span class="spacer"></span>
-    {% if user %}<span class="small muted" style="margin-right:8px">👤 {{ user.name }}</span>
+    {% if user %}<span class="small muted" style="margin-right:8px" title="{{ user.name }}">👤</span>
       <form class="inline" method="post" action="/logout" style="margin-right:8px"><button class="small">Đăng xuất</button></form>{% endif %}
     <form class="inline" method="post" action="/pause">
       {% if global_pause %}<button class="ok">▶ Bật lại đăng bài</button>

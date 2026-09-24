@@ -6,14 +6,14 @@ from datetime import date, timedelta
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from app import config, db
-from app.services import ai_writer, catalog, costs, facebook, importer, pipeline
+from app.services import ai_writer, catalog, costs, facebook, importer, pipeline, studio
 
 BASE = Path(__file__).resolve().parent
 PUBLIC_PATHS = ("/login", "/auth/", "/logout")
@@ -50,7 +50,18 @@ def num(value) -> str:
     return f"{int(value or 0):,}".replace(",", ".")
 
 
-templates.env.filters.update(vnd=vnd, num=num, loads=json.loads)
+def media_url(path: str) -> str:
+    """Link xem file media (ảnh/video trên máy chủ) trong app."""
+    for root in (config.MEDIA_DIR, config.UPLOAD_DIR):
+        try:
+            rel = Path(path).resolve().relative_to(Path(root).resolve())
+            return f"/media/{'m' if root == config.MEDIA_DIR else 'u'}/{rel.as_posix()}"
+        except ValueError:
+            continue
+    return ""
+
+
+templates.env.filters.update(vnd=vnd, num=num, loads=json.loads, media=media_url)
 templates.env.globals.update(config=config)
 
 
@@ -454,11 +465,13 @@ def page_detail(request: Request, page_id: str, status_: str = "published", days
         ).fetchall()
         counts = dict(conn.execute(
             "SELECT status, COUNT(*) FROM posts WHERE page_id = ? GROUP BY status", (page_id,)).fetchall())
-        order = "scheduled_at ASC" if status_ in ("pending", "approved") else "COALESCE(published_at, scheduled_at) DESC"
+        order = "posts.scheduled_at ASC" if status_ in ("pending", "approved") \
+        else "COALESCE(posts.published_at, posts.scheduled_at) DESC"
         posts = conn.execute(
-            f"""SELECT posts.*, products.name AS product_name, products.commission_rate
+            f"""SELECT posts.*, products.name AS product_name, kits.images AS kit_images, kits.video_path AS kit_video, products.commission_rate
                 FROM posts LEFT JOIN products ON products.item_id = posts.item_id
-                WHERE page_id = ? AND status = ? ORDER BY {order} LIMIT 30""",
+                LEFT JOIN media_kits kits ON kits.id = posts.kit_id
+                WHERE posts.page_id = ? AND posts.status = ? ORDER BY {order} LIMIT 30""",
             (page_id, status_),
         ).fetchall()
         niches = db.niche_names(conn)
@@ -536,9 +549,10 @@ def posts_list(request: Request, status: str = "published", page_id: str = "", n
             f"SELECT COUNT(*) FROM posts JOIN pages ON pages.id = posts.page_id WHERE {' AND '.join(where)}",
             args).fetchone()[0]
         rows = conn.execute(
-            f"""SELECT posts.*, pages.name AS page_name, pages.niche, products.name AS product_name
+            f"""SELECT posts.*, pages.name AS page_name, pages.niche, products.name AS product_name, kits.images AS kit_images, kits.video_path AS kit_video
                 FROM posts JOIN pages ON pages.id = posts.page_id
                 LEFT JOIN products ON products.item_id = posts.item_id
+                LEFT JOIN media_kits kits ON kits.id = posts.kit_id
                 WHERE {' AND '.join(where)}
                 ORDER BY COALESCE(posts.published_at, posts.scheduled_at) DESC LIMIT ? OFFSET ?""",
             args + [per, (max(p, 1) - 1) * per],
@@ -558,10 +572,11 @@ def review(request: Request, page_id: str = "", flagged: int = 0):
         where.append("posts.flags != '[]'")
     with db.get_conn() as conn:
         rows = conn.execute(
-            f"""SELECT posts.*, pages.name AS page_name, pages.niche, products.name AS product_name,
+            f"""SELECT posts.*, pages.name AS page_name, pages.niche, products.name AS product_name, kits.images AS kit_images, kits.video_path AS kit_video,
                   products.price, products.commission_rate, products.rating, products.sales
                 FROM posts JOIN pages ON pages.id = posts.page_id
                 LEFT JOIN products ON products.item_id = posts.item_id
+                LEFT JOIN media_kits kits ON kits.id = posts.kit_id
                 WHERE {' AND '.join(where)} ORDER BY posts.flags != '[]' DESC, posts.scheduled_at LIMIT 200""",
             args,
         ).fetchall()
@@ -631,7 +646,10 @@ def products(request: Request, niche: str = "", q: str = "", only: str = "", p: 
         rows = conn.execute(
             f"""SELECT products.*,
                   (SELECT COUNT(*) FROM posts WHERE posts.item_id = products.item_id AND status='published') AS used,
-                  (SELECT COALESCE(SUM(commission),0) FROM posts WHERE posts.item_id = products.item_id) AS earned
+                  (SELECT COALESCE(SUM(commission),0) FROM posts WHERE posts.item_id = products.item_id) AS earned,
+                  (SELECT COALESCE(NULLIF(file_path, ''), url) FROM product_images i
+                     WHERE i.item_id = products.item_id ORDER BY position, id LIMIT 1) AS src_first,
+                  (SELECT status FROM media_kits k WHERE k.item_id = products.item_id AND k.variant = 0) AS kit_status
                 FROM products WHERE {' AND '.join(where)}
                 ORDER BY blocked, fetched_at DESC, score DESC LIMIT ? OFFSET ?""",
             args + [per, (p - 1) * per],
@@ -683,7 +701,7 @@ def _catalog_result(niche: str, r: dict) -> RedirectResponse:
 
 
 @app.post("/products/add")
-async def product_add(niche: str = Form(...), aff_link: str = Form(...), product_link: str = Form(""),
+async def product_add(niche: str = Form(...), product_link: str = Form(...), aff_link: str = Form(""),
                       name: str = Form(""), price: str = Form(""), description: str = Form(""),
                       image_url: str = Form(""), video_url: str = Form(""),
                       video_file: UploadFile | None = File(None)):
@@ -784,6 +802,194 @@ def product_delete(request: Request, item_id: str):
     return RedirectResponse(_with_msg(request.headers.get("referer") or "/products", msg), 303)
 
 
+# ---------------- Studio: ảnh + video cho sản phẩm ----------------
+
+@app.get("/media/{kind}/{path:path}")
+def media_file(kind: str, path: str):
+    root = Path(config.MEDIA_DIR if kind == "m" else config.UPLOAD_DIR).resolve()
+    target = (root / path).resolve()
+    if kind not in ("m", "u") or root not in target.parents or not target.is_file():
+        raise HTTPException(404)
+    return FileResponse(target)
+
+
+def _bg_build(item_id: str, new_brief: bool = False, brief: dict | None = None) -> None:
+    with db.get_conn() as conn:
+        studio.build_all_variants(conn, item_id, new_brief=new_brief, brief=brief,
+                                  record_usage=pipeline.usage_recorder(conn))
+
+
+def _mark_processing(conn, item_ids: list[str]) -> None:
+    now = db.now_iso()
+    for item_id in item_ids:
+        conn.execute("""INSERT INTO media_kits(item_id, variant, status, created_at, updated_at)
+                        VALUES (?, 0, 'processing', ?, ?)
+                        ON CONFLICT(item_id, variant) DO UPDATE SET status = 'processing', error = NULL""",
+                     (item_id, now, now))
+
+
+@app.get("/studio", response_class=HTMLResponse)
+def studio_list(request: Request, niche: str = "", status: str = "", q: str = "", p: int = 1):
+    where, args = ["products.blocked = 0"], []
+    if niche:
+        where.append("products.niche = ?"); args.append(niche)
+    if q:
+        where.append("products.name LIKE ?"); args.append(f"%{q}%")
+    kit_status = "(SELECT status FROM media_kits k WHERE k.item_id = products.item_id AND k.variant = 0)"
+    if status == "none":
+        where.append(f"{kit_status} IS NULL")
+    elif status:
+        where.append(f"{kit_status} = ?"); args.append(status)
+    per, p = 40, max(p, 1)
+    with db.get_conn() as conn:
+        total = conn.execute(f"SELECT COUNT(*) FROM products WHERE {' AND '.join(where)}", args).fetchone()[0]
+        rows = conn.execute(
+            f"""SELECT products.*, {kit_status} AS kit_status,
+                  (SELECT images FROM media_kits k WHERE k.item_id = products.item_id AND k.variant = 0) AS kit_images,
+                  (SELECT COUNT(*) FROM media_kits k WHERE k.item_id = products.item_id AND k.status = 'ready') AS n_ready,
+                  (SELECT COUNT(*) FROM product_images i WHERE i.item_id = products.item_id) AS n_src,
+                  (SELECT COALESCE(NULLIF(file_path, ''), url) FROM product_images i
+                     WHERE i.item_id = products.item_id ORDER BY position, id LIMIT 1) AS src_first
+                FROM products WHERE {' AND '.join(where)}
+                ORDER BY (kit_status = 'processing') DESC, kit_status IS NULL DESC, fetched_at DESC
+                LIMIT ? OFFSET ?""",
+            args + [per, (p - 1) * per],
+        ).fetchall()
+        stats = dict(conn.execute(
+            """SELECT COALESCE(k.status, 'none'), COUNT(*) FROM products
+               LEFT JOIN media_kits k ON k.item_id = products.item_id AND k.variant = 0
+               WHERE products.blocked = 0 GROUP BY 1""").fetchall())
+        niches = db.niche_names(conn)
+    return render(request, "studio_list.html", rows=rows, niches=niches, niche=niche, status=status, q=q,
+                  total=total, p=p, per=per, stats=stats)
+
+
+@app.post("/studio/build")
+def studio_build_many(request: Request, background: BackgroundTasks, ids: list[str] = Form(default=[]),
+                      niche: str = Form(""), missing: str = Form("")):
+    with db.get_conn() as conn:
+        if missing:
+            where, args = ["blocked = 0",
+                           "item_id NOT IN (SELECT item_id FROM media_kits WHERE status IN ('ready', 'processing'))"], []
+            if niche:
+                where.append("niche = ?"); args.append(niche)
+            ids = [r[0] for r in conn.execute(f"SELECT item_id FROM products WHERE {' AND '.join(where)} LIMIT 200",
+                                              args)]
+        _mark_processing(conn, ids)
+    for item_id in ids:
+        background.add_task(_bg_build, item_id)
+    msg = f"Đang tạo bộ ảnh + video cho {len(ids)} sản phẩm (mỗi sản phẩm ~10-20 giây). Tải lại trang để xem."
+    return RedirectResponse(_with_msg(request.headers.get("referer") or "/studio", msg), 303)
+
+
+@app.get("/studio/{item_id}", response_class=HTMLResponse)
+def studio_detail(request: Request, item_id: str):
+    with db.get_conn() as conn:
+        product = conn.execute("SELECT * FROM products WHERE item_id = ?", (item_id,)).fetchone()
+        if not product:
+            raise HTTPException(404)
+        images = conn.execute("SELECT * FROM product_images WHERE item_id = ? ORDER BY position, id",
+                              (item_id,)).fetchall()
+        kits = conn.execute("SELECT * FROM media_kits WHERE item_id = ? ORDER BY variant", (item_id,)).fetchall()
+        brief = studio.get_brief(conn, item_id)
+        videos = conn.execute("SELECT * FROM videos WHERE item_id = ?", (item_id,)).fetchall()
+        used = conn.execute("""SELECT posts.media_type, COUNT(*) FROM posts WHERE item_id = ? AND status = 'published'
+                               GROUP BY 1""", (item_id,)).fetchall()
+    return render(request, "studio.html", product=product, images=images, kits=kits, brief=brief,
+                  videos=videos, used=dict(used), themes=studio.designer.THEMES)
+
+
+@app.post("/studio/{item_id}/build")
+def studio_build(request: Request, item_id: str, background: BackgroundTasks, new_brief: str = Form("")):
+    with db.get_conn() as conn:
+        _mark_processing(conn, [item_id])
+    background.add_task(_bg_build, item_id, bool(new_brief))
+    return go(f"/studio/{quote(item_id)}", "Đang tạo bộ ảnh + video, tải lại trang sau vài giây")
+
+
+@app.post("/studio/{item_id}/brief")
+def studio_brief(item_id: str, background: BackgroundTasks, headline: str = Form(""), subheadline: str = Form(""),
+                 points: str = Form(""), cta: str = Form(""), badge: str = Form(""), video_lines: str = Form(""),
+                 image_order: str = Form("")):
+    """Sửa chữ trên ảnh/video rồi dựng lại (không gọi AI)."""
+    order = [int(x) for x in image_order.replace(" ", "").split(",") if x.strip().isdigit()]
+    brief = {"headline": headline, "subheadline": subheadline, "cta": cta, "badge": badge,
+             "points": [x for x in points.splitlines() if x.strip()],
+             "video_lines": [x for x in video_lines.splitlines() if x.strip()], "image_order": order}
+    with db.get_conn() as conn:
+        _mark_processing(conn, [item_id])
+    background.add_task(_bg_build, item_id, False, brief)
+    return go(f"/studio/{quote(item_id)}", "Đã lưu nội dung, đang dựng lại ảnh + video")
+
+
+@app.post("/studio/{item_id}/images")
+async def studio_add_images(item_id: str, urls: str = Form(""), files: list[UploadFile] = File(default=[]),
+                            fetch: str = Form("")):
+    added = 0
+    with db.get_conn() as conn:
+        if not conn.execute("SELECT 1 FROM products WHERE item_id = ?", (item_id,)).fetchone():
+            raise HTTPException(404)
+        if fetch:
+            link = conn.execute("SELECT product_link FROM products WHERE item_id = ?", (item_id,)).fetchone()[0]
+            got = studio.shopee.fetch_images(link)
+            for url in got:
+                added += catalog.add_image(conn, item_id, url=url, source="shopee")
+            if not got:
+                return go(f"/studio/{quote(item_id)}", "Shopee chặn lấy ảnh tự động. Hãy dán link ảnh hoặc tải ảnh lên.",
+                          error=True)
+        for url in importer.URL_LIST_RE.findall(urls):
+            added += catalog.add_image(conn, item_id, url=url, source="file")
+        for f in files:
+            if not f.filename:
+                continue
+            if Path(f.filename).suffix.lower() not in (".jpg", ".jpeg", ".png", ".webp"):
+                continue
+            folder = studio._dir("src", studio._safe(item_id))
+            dest = folder / f"up_{db.now().strftime('%H%M%S%f')}{Path(f.filename).suffix.lower()}"
+            with dest.open("wb") as fh:
+                shutil.copyfileobj(f.file, fh)
+            added += catalog.add_image(conn, item_id, file_path=str(dest), source="upload")
+        studio.source_images(conn, item_id, fetch=False)          # tải ảnh về máy chủ
+    return go(f"/studio/{quote(item_id)}", f"Đã thêm {added} ảnh. Bấm “Tạo lại” để dựng bộ media mới.")
+
+
+@app.post("/studio/images/{image_id}/{action}")
+def studio_image_action(request: Request, image_id: int, action: str):
+    with db.get_conn() as conn:
+        img = conn.execute("SELECT * FROM product_images WHERE id = ?", (image_id,)).fetchone()
+        if not img:
+            raise HTTPException(404)
+        if action == "delete":
+            conn.execute("DELETE FROM product_images WHERE id = ?", (image_id,))
+        elif action in ("first", "up"):
+            rows = [r[0] for r in conn.execute(
+                "SELECT id FROM product_images WHERE item_id = ? ORDER BY position, id", (img["item_id"],))]
+            i = rows.index(image_id)
+            rows.pop(i)
+            rows.insert(0 if action == "first" else max(0, i - 1), image_id)
+            for pos, rid in enumerate(rows):
+                conn.execute("UPDATE product_images SET position = ? WHERE id = ?", (pos, rid))
+    return back(request, "/studio")
+
+
+@app.post("/studio/{item_id}/caption")
+def studio_caption(item_id: str):
+    """AI viết thử 1 bài đăng cho sản phẩm (không lưu thành bài)."""
+    with db.get_conn() as conn:
+        product = conn.execute("SELECT * FROM products WHERE item_id = ?", (item_id,)).fetchone()
+        page = conn.execute("SELECT * FROM pages WHERE niche = ? AND status = 'active' ORDER BY RANDOM() LIMIT 1",
+                            (product["niche"],)).fetchone()
+        page = dict(page) if page else {"name": "Page mẫu", "niche": product["niche"], "tone": "thân thiện, gần gũi"}
+        s = db.get_settings(conn)
+        (caption, error), = ai_writer.write_captions([{"page": page, "product": dict(product)}], s["disclosure"],
+                                                     pipeline.usage_recorder(conn))
+        if error:
+            return go(f"/studio/{quote(item_id)}", error, error=True)
+        conn.execute("UPDATE products SET sample_caption = ? WHERE item_id = ?",
+                     (f"[Viết cho page: {page['name']}]\n\n{caption}", item_id))
+    return go(f"/studio/{quote(item_id)}#bai-viet", "AI đã viết thử bài đăng")
+
+
 # ---------------- Cài đặt & chạy việc ----------------
 
 @app.get("/settings", response_class=HTMLResponse)
@@ -813,7 +1019,8 @@ def _cost_table(active_pages: int, posts_per_day: float) -> list[dict]:
 def settings_save(request: Request, min_commission_rate: float = Form(...), min_rating: float = Form(...),
                   min_sales: int = Form(...), max_pages_per_product_per_day: int = Form(...),
                   repeat_product_after_days: int = Form(...), post_hours: str = Form(...),
-                  blacklist: str = Form(""), disclosure: str = Form(...)):
+                  blacklist: str = Form(""), disclosure: str = Form(...), media_variants: int = Form(2),
+                  kit_media: str = Form("alternate")):
     try:
         hours = sorted({int(h) for h in post_hours.replace(" ", "").split(",") if h})
         assert hours and all(0 <= h <= 23 for h in hours)
@@ -825,7 +1032,8 @@ def settings_save(request: Request, min_commission_rate: float = Form(...), min_
             "max_pages_per_product_per_day": max_pages_per_product_per_day,
             "repeat_product_after_days": repeat_product_after_days, "post_hours": hours,
             "blacklist": [w.strip() for w in blacklist.splitlines() if w.strip()],
-            "disclosure": disclosure.strip(),
+            "disclosure": disclosure.strip(), "media_variants": max(1, min(media_variants, 6)),
+            "kit_media": kit_media if kit_media in ("alternate", "album", "video") else "alternate",
         }.items():
             db.set_setting(conn, key, value)
         db.log(conn, "info", "Cập nhật cài đặt chung")
@@ -844,7 +1052,8 @@ def toggle_pause(request: Request):
 
 @app.post("/jobs/{name}")
 def run_job(request: Request, name: str):
-    jobs = {"hunt": pipeline.hunt_products, "drafts": pipeline.generate_drafts, "publish": pipeline.publish_due,
+    jobs = {"hunt": pipeline.hunt_products, "media": pipeline.build_media, "drafts": pipeline.generate_drafts,
+            "publish": pipeline.publish_due,
             "sync": pipeline.sync_metrics, "pages": pipeline.import_pages}
     if name not in jobs:
         raise HTTPException(404)

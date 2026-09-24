@@ -122,6 +122,41 @@ def lookup_product(product_link: str) -> dict:
     return info
 
 
+IMG_CDN = "https://down-vn.img.susercontent.com/file/"
+_BROWSER_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+                  "Chrome/128.0 Safari/537.36",
+    "Accept": "application/json", "Accept-Language": "vi-VN,vi;q=0.9", "X-Api-Source": "pc",
+}
+
+
+def fetch_images(product_link: str, limit: int = 5) -> list[str]:
+    """Link ảnh sản phẩm (tối đa `limit`) lấy từ link Shopee.
+
+    Thứ tự thử: Shopee Affiliate Open API (ảnh chính) -> dữ liệu công khai của trang sản phẩm.
+    Shopee hay chặn truy cập tự động, nên có thể trả về ít ảnh hoặc rỗng: khi đó hãy dán link ảnh
+    vào cột "Link ảnh" của file Excel hoặc tải ảnh lên trong Studio.
+    """
+    m = re.search(r"-i\.(\d+)\.(\d+)", product_link or "") or re.search(r"/product/(\d+)/(\d+)", product_link or "")
+    if not m:
+        return []
+    shop_id, item_id = m.group(1), m.group(2)
+    urls: list[str] = []
+    try:
+        with httpx.Client(timeout=12, headers={**_BROWSER_HEADERS, "Referer": product_link},
+                          follow_redirects=True) as client:
+            resp = client.get("https://shopee.vn/api/v4/item/get", params={"itemid": item_id, "shopid": shop_id})
+            data = (resp.json() or {}).get("data") or {}
+            urls += [IMG_CDN + h for h in data.get("images") or [] if isinstance(h, str)]
+    except Exception:  # noqa: BLE001 - bị chặn / đổi API: dùng nguồn khác
+        pass
+    if not urls:
+        info = lookup_product(product_link)
+        if info.get("image_url"):
+            urls.append(info["image_url"])
+    return list(dict.fromkeys(urls))[:limit]
+
+
 LINK_MUTATION = """
 mutation($url: String!, $subIds: [String]) {
   generateShortLink(input: {originUrl: $url, subIds: $subIds}) { shortLink }

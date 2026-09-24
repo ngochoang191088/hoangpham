@@ -13,6 +13,9 @@
         <label>Tối đa số page dùng 1 sản phẩm/ngày<input type="number" name="max_pages_per_product_per_day" value="{{ s.max_pages_per_product_per_day }}"></label>
         <label>Không lặp sản phẩm trên 1 page trong (ngày)<input type="number" name="repeat_product_after_days" value="{{ s.repeat_product_after_days }}"></label>
         <label>Khung giờ đăng (giờ, cách nhau dấu phẩy)<input name="post_hours" value="{{ s.post_hours | join(', ') }}"></label>
+        <label>Số phiên bản bộ ảnh/video mỗi sản phẩm<input type="number" name="media_variants" min="1" max="6" value="{{ s.media_variants }}"></label>
+        <label>Đăng bộ media app tạo dạng<select name="kit_media">
+          {% for k, v in {'alternate':'Xen kẽ album ảnh & video','album':'Luôn album 3-5 ảnh','video':'Luôn video ngắn'}.items() %}<option value="{{ k }}" {{ 'selected' if s.kit_media == k }}>{{ v }}</option>{% endfor %}</select></label>
         <label>Ghi chú tiếp thị liên kết (thêm cuối mỗi bài)<input name="disclosure" value="{{ s.disclosure }}"></label>
       </div>
       <div class="form-grid" style="margin-top:12px">
@@ -27,6 +30,7 @@
     <p class="muted small">Bình thường các việc này chạy tự động bằng cron (xem README). Bấm để chạy ngay.</p>
     {% set jobs = [
       ('pages', 'Nhận diện lại page', 'Lấy danh sách page từ tài khoản Facebook đang đăng nhập'),
+      ('media', 'Tạo bộ ảnh + video', 'Cho 30 sản phẩm chưa có (chạy nền bằng cron để làm hết)'),
       ('drafts', 'Tạo bài nháp ngày mai', 'AI viết bài từ sản phẩm bạn đã nhập cho từng ngành'),
       ('publish', 'Đăng bài đến giờ', 'Đăng video / ảnh các bài đã duyệt'),
       ('sync', 'Cập nhật số liệu', 'Tương tác Facebook' ~ (' + hoa hồng Shopee' if config.SHOPEE_ENABLED else ''))] %}

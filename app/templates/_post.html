@@ -1,13 +1,16 @@
 {# Một bài đăng. Cần biến: r (post), show_page (bool) #}
 <div class="post">
-  {% if r.image_url %}<img src="{{ r.image_url }}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">{% else %}<div></div>{% endif %}
+  {% set kimgs = (r.kit_images | loads) if r.kit_images else [] %}
+  {% if r.media_type == 'kit_video' and r.kit_video %}<video src="{{ r.kit_video | media }}" preload="none" controls poster="{{ (kimgs[0] | media) if kimgs else '' }}" style="width:120px; aspect-ratio:9/16; object-fit:cover; border-radius:8px; background:#000"></video>
+  {% elif r.media_type == 'album' and kimgs %}<div style="display:grid; grid-template-columns:1fr 1fr; gap:3px; width:120px; align-content:start">
+      {% for k in kimgs[:4] %}<img src="{{ k | media }}" alt="" loading="lazy" style="width:100%; height:auto; aspect-ratio:4/5; border-radius:4px">{% endfor %}</div>
+  {% elif r.image_url %}<img src="{{ r.image_url }}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">{% else %}<div></div>{% endif %}
   <div>
     <div class="row">
       <span class="pill {{ r.status }}">{{ {'published':'Đã đăng','pending':'Chờ duyệt','approved':'Đã duyệt','rejected':'Từ chối','failed':'Lỗi'}[r.status] }}</span>
       {% if show_page %}<a href="/pages/{{ r.page_id }}"><b>{{ r.page_name }}</b></a>{% endif %}
       {% if r.source == 'facebook' %}<span class="pill niche">Đăng ngoài app</span>
-      {% elif r.media_type == 'video' %}<span class="pill niche">🎬 Video</span>
-      {% else %}<span class="pill niche">🖼 Ảnh</span>{% endif %}
+      {% else %}<span class="pill niche">{{ {'video':'🎬 Video riêng','kit_video':'🎬 Video app tạo','album':'🖼 Album ảnh'}.get(r.media_type, '🖼 1 ảnh') }}</span>{% endif %}
       <span class="muted small">
         {% if r.published_at %}Đăng lúc {{ r.published_at[:16].replace('T',' ') }}{% elif r.scheduled_at %}Lịch đăng {{ r.scheduled_at[:16].replace('T',' ') }}{% endif %}
       </span>
