@@ -3,6 +3,8 @@
 {% block content %}
 <h1>Sản phẩm, link aff & video theo ngành hàng</h1>
 
+{% include "_quick_add.html" %}
+
 <div class="row" style="gap:6px; margin-bottom:16px">
   <a class="pill {{ 'published' if not niche else '' }}" href="/products">Tất cả</a>
   {% for n in niches %}

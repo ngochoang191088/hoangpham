@@ -8,6 +8,7 @@ import io
 import json
 
 from app import config
+from app.services import ai_models
 
 BRIEF_SCHEMA = {
     "type": "object",
@@ -62,17 +63,19 @@ def make_brief(product: dict, image_paths: list[str], record_usage=None) -> dict
         return template_brief(product, len(image_paths))
     import anthropic
 
+    current = ai_models.tier()
+    model = ai_models.model_for("creative", current)
+    side = ai_models.IMAGE_SIDE[current]
     content = []
-    for i, path in enumerate(image_paths[:6]):
-        content += [{"type": "text", "text": f"Ảnh {i}:"}, _encode(path)]
+    for i, path in enumerate(image_paths[:5]):          # tối đa 5 ảnh, thu nhỏ để giảm token
+        content += [{"type": "text", "text": f"Ảnh {i}:"}, _encode(path, side)]
     content.append({"type": "text", "text": f"Thông tin sản phẩm:\n{_facts(product)}"})
     params = {
-        "model": config.AI_MODEL, "max_tokens": 16000, "system": SYSTEM,
+        "model": model, "max_tokens": 4000, "system": SYSTEM,
         "messages": [{"role": "user", "content": content}],
         "output_config": {"format": {"type": "json_schema", "schema": BRIEF_SCHEMA}},
     }
-    if not config.AI_MODEL.startswith("claude-haiku"):
-        params["output_config"]["effort"] = config.AI_EFFORT
+    params["output_config"].update(ai_models.request_options(model).get("output_config", {}))
     client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
     msg = client.messages.create(**params)
     if record_usage:

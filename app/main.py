@@ -13,7 +13,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from app import config, db
-from app.services import ai_writer, catalog, costs, facebook, importer, pipeline, studio
+from app.services import ai_writer, catalog, costs, facebook, importer, pipeline, quick_add, studio
 
 BASE = Path(__file__).resolve().parent
 PUBLIC_PATHS = ("/login", "/auth/", "/logout")
@@ -664,7 +664,8 @@ def products(request: Request, niche: str = "", q: str = "", only: str = "", p: 
             """SELECT niche, COUNT(*), SUM(item_id IN (SELECT item_id FROM videos)) FROM products
                WHERE blocked = 0 GROUP BY niche""")}
         niches = db.niche_names(conn)
-    return render(request, "products.html", rows=rows, videos=videos, niches=niches, niche=niche, q=q,
+        jobs = _recent_jobs(conn)
+    return render(request, "products.html", jobs=jobs, rows=rows, videos=videos, niches=niches, niche=niche, q=q,
                   only=only, total=total, p=p, per=per, counts=counts)
 
 
@@ -802,6 +803,48 @@ def product_delete(request: Request, item_id: str):
     return RedirectResponse(_with_msg(request.headers.get("referer") or "/products", msg), 303)
 
 
+# ---------------- Dán link Shopee: tự nhận diện sản phẩm ----------------
+
+def _recent_jobs(conn) -> list:
+    return conn.execute(
+        """SELECT link_jobs.*, products.name AS product_name FROM link_jobs
+           LEFT JOIN products ON products.item_id = link_jobs.item_id
+           ORDER BY link_jobs.id DESC LIMIT 15""").fetchall()
+
+
+@app.post("/links")
+def links_add(request: Request, background: BackgroundTasks, links: str = Form(...), niche: str = Form(""),
+              auto_media: str = Form("")):
+    with db.get_conn() as conn:
+        if niche and niche not in db.niche_names(conn):
+            niche = ""
+        ids = quick_add.create_jobs(conn, links, niche, bool(auto_media))
+    for job_id in ids:
+        background.add_task(quick_add.run_job, job_id)
+    url = request.headers.get("referer") or "/products"
+    if not ids:
+        return RedirectResponse(_with_msg(url, "Không thấy link Shopee nào") + "&err=1", 303)
+    msg = f"Đã nhận {len(ids)} link. App đang đọc sản phẩm, xếp ngành và tạo ảnh + video (xem tiến độ bên dưới)."
+    return RedirectResponse(_with_msg(url, msg), 303)
+
+
+@app.post("/links/{job_id}/niche")
+def links_set_niche(request: Request, job_id: int, background: BackgroundTasks, niche: str = Form(...)):
+    with db.get_conn() as conn:
+        ok = quick_add.set_niche_and_resume(conn, job_id, niche)
+    if ok:
+        background.add_task(quick_add.run_job, job_id)
+    return back(request, "/products")
+
+
+@app.post("/links/{job_id}/retry")
+def links_retry(request: Request, job_id: int, background: BackgroundTasks):
+    with db.get_conn() as conn:
+        conn.execute("UPDATE link_jobs SET status = 'queued', error = NULL, detected = '{}' WHERE id = ?", (job_id,))
+    background.add_task(quick_add.run_job, job_id)
+    return back(request, "/products")
+
+
 # ---------------- Studio: ảnh + video cho sản phẩm ----------------
 
 @app.get("/media/{kind}/{path:path}")
@@ -860,7 +903,8 @@ def studio_list(request: Request, niche: str = "", status: str = "", q: str = ""
                LEFT JOIN media_kits k ON k.item_id = products.item_id AND k.variant = 0
                WHERE products.blocked = 0 GROUP BY 1""").fetchall())
         niches = db.niche_names(conn)
-    return render(request, "studio_list.html", rows=rows, niches=niches, niche=niche, status=status, q=q,
+        jobs = _recent_jobs(conn)
+    return render(request, "studio_list.html", jobs=jobs, rows=rows, niches=niches, niche=niche, status=status, q=q,
                   total=total, p=p, per=per, stats=stats)
 
 
@@ -1003,16 +1047,20 @@ def settings_page(request: Request):
         cur = conn.execute(
             "SELECT COUNT(*), COALESCE(AVG(posts_per_day), 3) FROM pages WHERE status = 'active'").fetchone()
         actual = costs.actual_this_month(conn)
-    return render(request, "settings.html", s=s, activity=activity, cost=_cost_table(cur[0], cur[1]),
+    return render(request, "settings.html", s=s, activity=activity, cost=_cost_table(cur[0], cur[1], s.get("ai_tier", "save")),
                   actual=actual, posts_per_day=cur[1])
 
 
-def _cost_table(active_pages: int, posts_per_day: float) -> list[dict]:
+def _cost_table(active_pages: int, posts_per_day: float, current_tier: str) -> list[dict]:
+    from app.services import ai_models
+
     sizes = sorted({active_pages, 100, 250, 500} - {0})
-    return [{"model": m, "label": costs.MODEL_LABELS[m], "current": m == config.AI_MODEL,
-             "rows": [costs.estimate(n, posts_per_day, m, batch=True) for n in sizes],
-             "per_caption_vnd": costs.cost_per_caption(m, True) * config.USD_VND}
-            for m in costs.MODEL_LABELS]
+    return [{"tier": t, "label": ai_models.TIER_LABELS[t], "current": t == current_tier,
+             "rows": [costs.estimate(n, posts_per_day, t) for n in sizes],
+             "per_caption_vnd": costs.cost_per_caption(ai_models.model_for("caption", t)) * config.USD_VND,
+             "per_kit_vnd": costs.cost_per_kit(ai_models.model_for("creative", t), ai_models.IMAGE_SIDE[t])
+             * config.USD_VND}
+            for t in ai_models.TIERS]
 
 
 @app.post("/settings")
@@ -1020,7 +1068,7 @@ def settings_save(request: Request, min_commission_rate: float = Form(...), min_
                   min_sales: int = Form(...), max_pages_per_product_per_day: int = Form(...),
                   repeat_product_after_days: int = Form(...), post_hours: str = Form(...),
                   blacklist: str = Form(""), disclosure: str = Form(...), media_variants: int = Form(2),
-                  kit_media: str = Form("alternate")):
+                  kit_media: str = Form("alternate"), ai_tier: str = Form("save")):
     try:
         hours = sorted({int(h) for h in post_hours.replace(" ", "").split(",") if h})
         assert hours and all(0 <= h <= 23 for h in hours)
@@ -1034,6 +1082,7 @@ def settings_save(request: Request, min_commission_rate: float = Form(...), min_
             "blacklist": [w.strip() for w in blacklist.splitlines() if w.strip()],
             "disclosure": disclosure.strip(), "media_variants": max(1, min(media_variants, 6)),
             "kit_media": kit_media if kit_media in ("alternate", "album", "video") else "alternate",
+            "ai_tier": ai_tier if ai_tier in ("save", "balanced", "quality") else "save",
         }.items():
             db.set_setting(conn, key, value)
         db.log(conn, "info", "Cập nhật cài đặt chung")

@@ -1,6 +1,7 @@
 """Chạy việc tự động từ dòng lệnh (dùng cho cron).
 
     python -m app.jobs hunt       # săn sản phẩm (1 lần/ngày)
+    python -m app.jobs links      # xử lý nốt link Shopee đang chờ (nếu app khởi động lại giữa chừng)
     python -m app.jobs media      # tạo bộ ảnh + video cho sản phẩm mới (trước khi tạo bài)
     python -m app.jobs drafts     # tạo bài nháp cho ngày mai (1 lần/ngày)
     python -m app.jobs publish    # đăng bài đến giờ (mỗi 5 phút)
@@ -10,10 +11,11 @@
 import sys
 
 from app import db
-from app.services import pipeline
+from app.services import pipeline, quick_add
 
 JOBS = {
     "hunt": pipeline.hunt_products,
+    "links": lambda conn: quick_add.run_pending(),
     "media": pipeline.build_media,
     "drafts": pipeline.generate_drafts,
     "publish": pipeline.publish_due,

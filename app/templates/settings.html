@@ -13,6 +13,8 @@
         <label>Tối đa số page dùng 1 sản phẩm/ngày<input type="number" name="max_pages_per_product_per_day" value="{{ s.max_pages_per_product_per_day }}"></label>
         <label>Không lặp sản phẩm trên 1 page trong (ngày)<input type="number" name="repeat_product_after_days" value="{{ s.repeat_product_after_days }}"></label>
         <label>Khung giờ đăng (giờ, cách nhau dấu phẩy)<input name="post_hours" value="{{ s.post_hours | join(', ') }}"></label>
+        <label>Chế độ AI<select name="ai_tier">
+          {% for k, v in {'save':'Tiết kiệm nhất (Haiku 4.5)','balanced':'Cân bằng (Sonnet 5 viết bài)','quality':'Chất lượng cao (Opus 5)'}.items() %}<option value="{{ k }}" {{ 'selected' if s.ai_tier == k }}>{{ v }}</option>{% endfor %}</select></label>
         <label>Số phiên bản bộ ảnh/video mỗi sản phẩm<input type="number" name="media_variants" min="1" max="6" value="{{ s.media_variants }}"></label>
         <label>Đăng bộ media app tạo dạng<select name="kit_media">
           {% for k, v in {'alternate':'Xen kẽ album ảnh & video','album':'Luôn album 3-5 ảnh','video':'Luôn video ngắn'}.items() %}<option value="{{ k }}" {{ 'selected' if s.kit_media == k }}>{{ v }}</option>{% endfor %}</select></label>
@@ -45,7 +47,7 @@
       <tr><td>Facebook</td><td>{{ '✅ Đăng nhập bằng Facebook' if config.FB_LOGIN_ENABLED else ('✅ System User' if config.FB_ENABLED else '⚪ DEMO') }}
         {% if s.owner_name %}<div class="small muted">Tài khoản: {{ s.owner_name }}{% if s.owner_token_expires %} · cần đăng nhập lại trước {{ s.owner_token_expires[:10] }}{% endif %}</div>{% endif %}</td></tr>
       <tr><td>Shopee Open API</td><td>{{ '✅ Đã kết nối' if config.SHOPEE_ENABLED else '⚪ Không dùng (nhập link aff thủ công)' }}</td></tr>
-      <tr><td>Claude AI</td><td>{{ '✅ ' ~ config.AI_MODEL if config.AI_ENABLED else '⚪ Dùng mẫu có sẵn' }}</td></tr>
+      <tr><td>Claude AI</td><td>{{ '✅ Đã kết nối' if config.AI_ENABLED else '⚪ Chưa có API key (dùng mẫu có sẵn)' }}</td></tr>
     </table>
   </div>
 </div>
@@ -57,18 +59,21 @@
     Facebook Graph API và Shopee Affiliate API <b>miễn phí</b>.
   </p>
   <div class="table-wrap"><table>
-    <tr><th>Model AI viết bài</th><th class="num">≈ / bài</th>
+    <tr><th>Chế độ AI</th><th class="num">≈ / bài viết</th><th class="num">≈ / bộ ảnh + video</th>
       {% for r in cost[0].rows %}<th class="num">{{ r.pages }} page<div class="small muted">{{ r.captions | num }} bài/tháng</div></th>{% endfor %}</tr>
     {% for c in cost %}
     <tr style="{{ 'background: var(--accent-soft)' if c.current }}">
       <td><b>{{ c.label }}</b>{% if c.current %} <span class="pill niche">đang dùng</span>{% endif %}</td>
-      <td class="num">{{ ((c.per_caption_vnd / 10) | round * 10) | vnd }}</td>
+      <td class="num">{{ c.per_caption_vnd | round | int }}đ</td>
+      <td class="num">{{ c.per_kit_vnd | round | int }}đ</td>
       {% for r in c.rows %}<td class="num"><b>{{ ((r.total_vnd / 1000) | round * 1000) | vnd }}</b><div class="small muted">AI ${{ "%.0f" | format(r.ai_usd) }} + VPS ${{ r.vps_usd | int }}</div></td>{% endfor %}
     </tr>
     {% endfor %}
   </table></div>
-  <p class="small muted">Đây là ước tính: một bài giả định khoảng 600 token đầu vào và 1.000 token đầu ra (Haiku: 400).
-    Sau khi chạy thật, số liệu thật sẽ hiện ngay bên dưới. Đổi model bằng biến AI_MODEL trong file .env.</p>
+  <p class="small muted">Ước tính: 1 bài viết ≈ 600 token vào + 400 token ra (Sonnet/Opus thêm phần suy nghĩ);
+    1 bộ ảnh + video ≈ 5 ảnh thu nhỏ + 700 token chữ vào, 350 token ra, làm 1 lần mỗi sản phẩm (giả định mỗi sản phẩm đăng ~10 lần).
+    Chỉnh ảnh + dựng video chạy trên máy chủ, <b>không tốn token</b>. Xếp ngành hàng bằng từ khoá, chỉ gọi AI khi không đoán được.
+    Sau khi chạy thật, chi phí thật hiện ngay bên dưới.</p>
   <div class="alert {{ 'ok' if actual.calls else 'warn' }}">
     {% if actual.calls %}Chi phí AI thật tháng này: <b>{{ actual.vnd | vnd }}</b> cho {{ actual.calls | num }} bài
       (≈ {{ (actual.per_caption_usd * config.USD_VND) | vnd }}/bài).

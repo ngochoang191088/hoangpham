@@ -1,0 +1,41 @@
+{# Dán link Shopee -> tự nhận diện. Cần: niches, jobs #}
+<div class="card" style="margin-bottom:16px; border-color: var(--accent)" id="dan-link">
+  <h2>⚡ Dán link Shopee: app tự nhận diện sản phẩm, tạo ảnh mới + video mới</h2>
+  <form method="post" action="/links" class="form-grid" style="grid-template-columns: 2fr 1fr">
+    <label>Link sản phẩm Shopee, mỗi link 1 dòng. Có link aff thì thêm cùng dòng sau dấu | (hoặc chỉ dán link aff s.shopee.vn)
+      <textarea name="links" required style="min-height:110px; font-family:monospace; font-size:12px"
+        placeholder="https://shopee.vn/product/1496179755/41457616922
+https://shopee.vn/Noi-chien-khong-dau-5L-i.123.456 | https://s.shopee.vn/AbCdEf
+https://s.shopee.vn/XyZ123"></textarea></label>
+    <div class="form-grid" style="grid-template-columns:1fr; align-content:start">
+      <label>Ngành hàng<select name="niche"><option value="">Tự nhận diện</option>
+        {% for n in niches %}<option>{{ n }}</option>{% endfor %}</select></label>
+      <label class="row small" style="flex-direction:row"><input type="checkbox" name="auto_media" value="1" checked> Tạo luôn 3-5 ảnh + video</label>
+      <button class="primary">Nhận diện & tạo</button>
+      <span class="small muted">App đọc tên, giá, ảnh, mô tả, lượt bán từ Shopee → xếp ngành → AI soạn chữ → dựng ảnh + video (~20-40 giây/link).</span>
+    </div>
+  </form>
+  {% if jobs %}
+  <div class="table-wrap" style="margin-top:12px"><table>
+    <tr><th>Link</th><th>Sản phẩm</th><th>Trạng thái</th><th></th></tr>
+    {% for j in jobs %}
+    <tr>
+      <td class="small" style="max-width:280px; word-break:break-all">{{ j.input }}{% if j.aff_link %}<div class="muted">aff: {{ j.aff_link }}</div>{% endif %}</td>
+      <td class="small">{% if j.item_id %}<a href="/studio/{{ j.item_id | urlencode }}"><b>{{ j.product_name or j.item_id }}</b></a>
+        <div class="muted">{{ j.niche }}</div>{% endif %}</td>
+      <td class="small"><span class="pill {{ {'done':'published','error':'failed','need_niche':'pending'}.get(j.status, 'pending') }}">
+        {{ {'queued':'Chờ','running':'Đang xử lý','need_niche':'Cần chọn ngành','done':'Xong','error':'Lỗi'}[j.status] }}</span>
+        <div class="muted">{{ j.step }}</div>{% if j.error %}<div class="flag">{{ j.error }}</div>{% endif %}</td>
+      <td class="small" style="white-space:nowrap">
+        {% if j.status == 'need_niche' %}
+          <form method="post" action="/links/{{ j.id }}/niche" class="row"><select name="niche">{% for n in niches %}<option>{{ n }}</option>{% endfor %}</select><button class="small">Tiếp tục</button></form>
+        {% elif j.status == 'error' %}
+          <form method="post" action="/links/{{ j.id }}/retry"><button class="small">↻ Thử lại</button></form>
+        {% elif j.status == 'done' and j.item_id %}<a href="/studio/{{ j.item_id | urlencode }}">🎨 Xem ảnh + video</a>{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table></div>
+  {% if jobs | selectattr('status', 'in', ['queued', 'running']) | list %}<script>setTimeout(() => location.reload(), 6000)</script>{% endif %}
+  {% endif %}
+</div>

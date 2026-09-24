@@ -108,6 +108,22 @@ CREATE TABLE IF NOT EXISTS media_kits (
     UNIQUE(item_id, variant)
 );
 
+-- Link Shopee người dùng dán vào: app tự nhận diện sản phẩm, xếp ngành, tạo ảnh + video
+CREATE TABLE IF NOT EXISTS link_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    input TEXT NOT NULL,                  -- link dán vào (link sản phẩm / link rút gọn / link aff)
+    aff_link TEXT NOT NULL DEFAULT '',
+    niche TEXT NOT NULL DEFAULT '',       -- ngành chọn sẵn; trống = tự nhận diện
+    auto_media INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'queued',  -- queued | running | need_niche | done | error
+    step TEXT NOT NULL DEFAULT '',
+    item_id TEXT,
+    detected TEXT NOT NULL DEFAULT '{}',
+    error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS conversions (
     conversion_id TEXT PRIMARY KEY,
     page_id TEXT,
@@ -170,6 +186,7 @@ DEFAULT_SETTINGS = {
     "disclosure": "#tiepthilienket",
     # Bộ media app tạo: số phiên bản khác nhau mỗi sản phẩm; cách dùng khi đăng bài
     "media_variants": 2,
+    "ai_tier": "save",          # save (Haiku 4.5, rẻ nhất) | balanced | quality — xem services/ai_models.py
     "kit_media": "alternate",   # alternate (xen kẽ album ảnh / video) | album | video
 }
 

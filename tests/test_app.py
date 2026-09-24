@@ -7,6 +7,7 @@ os.environ["ADMIN_USER"] = "admin"
 os.environ["ADMIN_PASSWORD"] = "secret"
 os.environ["UPLOAD_DIR"] = os.path.join(tempfile.mkdtemp(), "uploads")
 os.environ["MEDIA_DIR"] = os.path.join(tempfile.mkdtemp(), "media")
+os.environ["SHOPEE_FETCH"] = "0"      # test không gọi mạng Shopee
 for key in ("FB_APP_ID", "FB_APP_SECRET", "FB_SYSTEM_USER_TOKEN", "SHOPEE_APP_ID", "SHOPEE_APP_SECRET",
             "ANTHROPIC_API_KEY"):
     os.environ[key] = ""
@@ -263,13 +264,19 @@ def test_direct_video_url():
 
 
 def test_cost_estimate():
-    from app.services import costs
-    small = costs.estimate(80, 3, "claude-opus-5")
-    big = costs.estimate(500, 3, "claude-opus-5")
-    assert small["captions"] == 7200 and big["captions"] == 45000
-    assert big["total_usd"] > small["total_usd"]
-    assert costs.cost_per_caption("claude-opus-5", batch=True) == costs.cost_per_caption("claude-opus-5", False) / 2
-    assert costs.cost_per_caption("claude-haiku-4-5", True) < costs.cost_per_caption("claude-sonnet-5", True)
+    from app.services import ai_models, costs
+    save = costs.estimate(80, 3, "save")
+    quality = costs.estimate(80, 3, "quality")
+    assert save["captions"] == 7200 and save["products"] == 720
+    assert save["total_usd"] < quality["total_usd"]
+    assert costs.estimate(500, 3, "save")["total_usd"] > save["total_usd"]
+    haiku = costs.cost_per_caption("claude-haiku-4-5")
+    assert haiku == costs.cost_per_caption("claude-haiku-4-5", batch=False) / 2
+    assert haiku < costs.cost_per_caption("claude-sonnet-5") < costs.cost_per_caption("claude-opus-5")
+    assert costs.cost_per_kit("claude-haiku-4-5", 512) < costs.cost_per_kit("claude-haiku-4-5", 768)
+    assert ai_models.model_for("caption", "save") == "claude-haiku-4-5"
+    assert ai_models.request_options("claude-haiku-4-5") == {}            # Haiku: không bật suy nghĩ
+    assert ai_models.request_options("claude-sonnet-5") == {"output_config": {"effort": "low"}}
 
 
 def test_batch_captions(monkeypatch):
@@ -478,3 +485,75 @@ def test_brief_uses_claude_vision_with_json_schema(monkeypatch, tmp_path):
     assert brief["points"] == ["Ít dầu", "Dễ rửa", "Hẹn giờ", "Thêm"]
     assert brief["image_order"] == [0]                 # chỉ số ảnh sai bị loại, không trùng
     assert usage == [("claude-opus-5", 1500, 300, False)]
+
+
+def test_paste_shopee_links_detects_classifies_and_builds_media(client):
+    """Dán link -> nhận diện -> tự xếp ngành (từ khoá) -> tạo ảnh + video; không đoán được ngành -> hỏi người dùng."""
+    text = ("https://shopee.vn/Noi-chien-khong-dau-6L-i.555.666 | https://s.shopee.vn/aff1\n"
+            "https://shopee.vn/product/1496179755/41457616922\n"
+            "dòng rác không có link")
+    r = client.post("/links", data={"links": text, "auto_media": "1"})
+    assert "Đã nhận 2 link" in r.text
+    with db.get_conn() as conn:
+        jobs = {j["input"]: j for j in conn.execute("SELECT * FROM link_jobs")}
+        a = jobs["https://shopee.vn/Noi-chien-khong-dau-6L-i.555.666"]
+        assert a["status"] == "done", (a["step"], a["error"])
+        assert a["niche"] == "Gia dụng nhà bếp" and "từ khoá" in a["step"]
+        p = conn.execute("SELECT * FROM products WHERE item_id = '555.666'").fetchone()
+        assert p["name"] == "Noi chien khong dau 6L" and p["aff_link"] == "https://s.shopee.vn/aff1"
+        assert p["price"] > 0 and p["sales"] > 0
+        assert conn.execute("SELECT COUNT(*) FROM media_kits WHERE item_id = '555.666' AND status = 'ready'"
+                            ).fetchone()[0] == 2
+        b = jobs["https://shopee.vn/product/1496179755/41457616922"]
+        assert b["status"] == "need_niche"
+    assert "Cần chọn ngành" in client.get("/products").text
+    client.post(f"/links/{b['id']}/niche", data={"niche": "Thú cưng"})
+    with db.get_conn() as conn:
+        b = conn.execute("SELECT * FROM link_jobs WHERE id = ?", (b["id"],)).fetchone()
+        assert b["status"] == "done" and b["item_id"] == "1496179755.41457616922"
+        p = conn.execute("SELECT niche, aff_link FROM products WHERE item_id = ?", (b["item_id"],)).fetchone()
+        assert p["niche"] == "Thú cưng" and p["aff_link"] == ""       # chưa có link aff: chưa tạo bài
+    assert "Thú cưng" in client.get("/studio").text
+
+
+def test_detect_product_from_short_aff_link(monkeypatch):
+    """Link aff rút gọn -> theo chuyển hướng ra link sản phẩm; đọc tên/giá/ảnh/mô tả; giữ link aff."""
+    from types import SimpleNamespace as NS
+
+    from app import config
+    monkeypatch.setattr(config, "SHOPEE_FETCH", True)
+    monkeypatch.setattr(config, "SHOPEE_ENABLED", False)
+
+    class FakeClient:
+        def __init__(self, *a, headers=None, **k):
+            self.ua = (headers or {}).get("User-Agent", "")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def get(self, url, params=None):
+            if url.startswith("https://s.shopee.vn/"):
+                hop = NS(headers={"location": "https://shopee.vn/Tai-nghe-bluetooth-X1-i.77.99?sp_atk=abc"})
+                return NS(history=[hop], url="https://shopee.vn/Tai-nghe-bluetooth-X1-i.77.99?sp_atk=abc")
+            if "api/v4/item/get" in url:
+                assert params == {"itemid": "99", "shopid": "77"}
+                return NS(json=lambda: {"data": {
+                    "name": "Tai nghe bluetooth X1 chống ồn", "price": 25900000000, "images": ["h1", "h2", "h3"],
+                    "description": "Pin 30 giờ. Chống ồn chủ động.", "historical_sold": 5321,
+                    "item_rating": {"rating_star": 4.87}, "categories": [{"display_name": "Thiết Bị Âm Thanh"}]}})
+            raise AssertionError(url)
+
+    monkeypatch.setattr(shopee.httpx, "Client", FakeClient)
+    info = shopee.detect_product("https://s.shopee.vn/AbC123")
+    assert info["product_link"] == "https://shopee.vn/Tai-nghe-bluetooth-X1-i.77.99"
+    assert info["aff_link"] == "https://s.shopee.vn/AbC123"
+    assert (info["name"], info["price"], info["sales"], info["rating"]) == ("Tai nghe bluetooth X1 chống ồn", 259000,
+                                                                           5321, 4.9)
+    assert info["images"] == [shopee.IMG_CDN + h for h in ("h1", "h2", "h3")]
+    assert info["categories"] == ["Thiết Bị Âm Thanh"]
+    with db.get_conn() as conn:
+        from app.services import catalog
+        assert catalog.guess_niche(conn, info["name"], info["categories"])[0] == "Âm thanh"

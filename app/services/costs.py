@@ -12,38 +12,53 @@ PRICES = {
     "claude-sonnet-5": (2.00, 10.00),
     "claude-haiku-4-5": (1.00, 5.00),
 }
-MODEL_LABELS = {
-    "claude-opus-5": "Claude Opus 5 (viết hay nhất)",
-    "claude-sonnet-5": "Claude Sonnet 5 (cân bằng)",
-    "claude-haiku-4-5": "Claude Haiku 4.5 (rẻ nhất)",
-}
 
-# Token trung bình cho 1 caption tiếng Việt ~100 chữ (ước lượng, sẽ được thay bằng số đo thật khi chạy):
-INPUT_TOKENS = 600                 # hướng dẫn + thông tin sản phẩm
-OUTPUT_TOKENS_THINKING = 1000      # nội dung (~350) + phần AI suy nghĩ trước khi viết
-OUTPUT_TOKENS_NO_THINKING = 400    # Haiku: không bật suy nghĩ
+# Token trung bình (ước lượng, được thay bằng số đo thật khi chạy):
+INPUT_TOKENS = 600                 # 1 bài viết: hướng dẫn + thông tin sản phẩm
+CAPTION_OUT = 400                  # ~100 chữ tiếng Việt
+THINKING_OUT = {"claude-haiku": 0, "claude-sonnet": 300, "claude-opus": 650}   # phần AI "suy nghĩ" thêm
+BRIEF_TEXT_IN, BRIEF_OUT = 700, 350  # soạn chữ cho bộ ảnh + video (1 lần / sản phẩm, dùng lại cho mọi phiên bản)
+IMAGES_PER_BRIEF = 5
+POSTS_PER_PRODUCT = 10             # giả định: mỗi sản phẩm được đăng ~10 lần trên các page -> số sản phẩm mới/tháng
 
-# Máy chủ (VPS) theo quy mô, USD/tháng
+
+def _thinking(model: str) -> int:
+    return next((v for k, v in THINKING_OUT.items() if model.startswith(k)), 0)
+
+
+def _price(model: str) -> tuple[float, float]:
+    return PRICES[next(m for m in sorted(PRICES, key=len, reverse=True) if model.startswith(m))]
+
+
 def vps_usd(pages: int) -> float:
-    return 6 if pages <= 100 else 12 if pages <= 250 else 24
+    """Máy chủ (VPS) theo quy mô, USD/tháng (dựng video cần CPU hơn)."""
+    return 8 if pages <= 100 else 16 if pages <= 250 else 32
 
 
-def cost_per_caption(model: str, batch: bool, input_tokens: float | None = None,
-                     output_tokens: float | None = None) -> float:
-    price_in, price_out = PRICES[model]
-    tin = input_tokens if input_tokens is not None else INPUT_TOKENS
-    tout = output_tokens if output_tokens is not None else (
-        OUTPUT_TOKENS_NO_THINKING if model.startswith("claude-haiku") else OUTPUT_TOKENS_THINKING)
-    usd = (tin * price_in + tout * price_out) / 1_000_000
+def cost_per_caption(model: str, batch: bool = True) -> float:
+    price_in, price_out = _price(model)
+    usd = (INPUT_TOKENS * price_in + (CAPTION_OUT + _thinking(model)) * price_out) / 1_000_000
     return usd / 2 if batch else usd
 
 
-def estimate(pages: int, posts_per_day: float, model: str, batch: bool = True) -> dict:
+def cost_per_kit(model: str, image_side: int) -> float:
+    """Chi phí AI soạn chữ cho bộ ảnh + video của 1 sản phẩm (ảnh + dựng video chạy trên máy chủ, không tốn token)."""
+    price_in, price_out = _price(model)
+    image_tokens = IMAGES_PER_BRIEF * (image_side * image_side / 750)
+    return ((BRIEF_TEXT_IN + image_tokens) * price_in + (BRIEF_OUT + _thinking(model)) * price_out) / 1_000_000
+
+
+def estimate(pages: int, posts_per_day: float, tier: str) -> dict:
+    from app.services import ai_models
+
+    caption_model = ai_models.model_for("caption", tier)
+    creative_model = ai_models.model_for("creative", tier)
     captions = round(pages * posts_per_day * 30)
-    ai = captions * cost_per_caption(model, batch)
+    products = max(1, round(captions / POSTS_PER_PRODUCT))
+    ai = captions * cost_per_caption(caption_model) + products * cost_per_kit(creative_model, ai_models.IMAGE_SIDE[tier])
     vps = vps_usd(pages)
     total = ai + vps
-    return {"pages": pages, "captions": captions, "ai_usd": ai, "vps_usd": vps,
+    return {"pages": pages, "captions": captions, "products": products, "ai_usd": ai, "vps_usd": vps,
             "total_usd": total, "total_vnd": total * config.USD_VND}
 
 

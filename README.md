@@ -10,7 +10,13 @@ AI viết bài, app tự đăng **video** (nếu sản phẩm có video) hoặc 
    bấm *Nhận diện lại page từ Facebook* hoặc đăng nhập lại.
 2. **Chọn ngành hàng cho page** (trang *Page → Chưa chọn ngành hàng*): tick nhiều page rồi áp 1 ngành,
    hoặc chọn ngay trên từng dòng. Danh sách ngành hàng sửa ở trang *Ngành hàng* (mặc định 16 ngành, mục tiêu 5 page/ngành).
-3. **Nhập sản phẩm cho từng ngành** (trang *Sản phẩm*): mỗi ngành 1 file Excel riêng
+3. **⚡ Dán link Shopee** (trang *Sản phẩm* hoặc *Studio*): dán 1 hay nhiều link (link sản phẩm, link rút gọn
+   hoặc link aff `s.shopee.vn`), app tự:
+   - đọc **tên, giá, ảnh, mô tả, lượt bán, đánh giá, danh mục** từ Shopee (Open API → trang sản phẩm → thẻ chia sẻ);
+   - **xếp ngành hàng** bằng từ khoá (miễn phí), chỉ hỏi AI khi không đoán được; vẫn không rõ thì hỏi bạn;
+   - **tạo bộ 3-5 ảnh mới + video mới** (bước 4). Link aff dán cùng dòng sau dấu `|` được gắn vào bài.
+
+   Hoặc **nhập file** cho từng ngành (trang *Sản phẩm*): mỗi ngành 1 file Excel riêng
    (`.xlsx`, `.csv`, `.docx`, `.txt`), hoặc thêm từng sản phẩm. Tải file mẫu ngay trong app.
 
    | Tên sản phẩm | **Link sản phẩm** (bắt buộc) | Link aff | Giá | Mô tả | Link ảnh (nhiều link) | Link video |
@@ -36,8 +42,10 @@ AI viết bài, app tự đăng **video** (nếu sản phẩm có video) hoặc 
 7. **Theo dõi** ở *Tổng quan*: tương tác, hoa hồng theo page / ngành / sản phẩm; cảnh báo page bị hạn chế,
    mất quyền, ngành chưa có sản phẩm, bài lỗi. Có **nút dừng khẩn cấp** toàn bộ.
 
-| Studio: ảnh gốc → 3-5 ảnh đã thiết kế + video | Bộ ảnh mẫu (3 phiên bản khác nhau) |
+| Dán link Shopee → tự nhận diện + tạo ảnh/video | Chi phí theo chế độ AI |
 |---|---|
+| ![](docs/quick_add.png) | ![](docs/costs.png) |
+| **Studio: ảnh gốc → 3-5 ảnh đã thiết kế + video** | **Bộ ảnh mẫu (3 phiên bản khác nhau)** |
 | ![](docs/studio.png) | ![](docs/studio_sheet.jpg) |
 | **Chọn ngành hàng cho page** | **Sản phẩm, link aff & video** |
 | ![](docs/pages_unassigned.png) | ![](docs/products.png) |
@@ -84,10 +92,18 @@ không hết hạn nên việc đăng bài vẫn chạy. Chỉ cần đăng nh�
 > Chỉ dùng API chính thức của Facebook. Không dùng tool đăng nhập bằng cookie hay nick clone, vì đó là cách nhanh nhất để mất page.
 > Chỉ đăng video/ảnh bạn có quyền sử dụng.
 
-### 2. Claude AI (viết bài)
-Dán `ANTHROPIC_API_KEY`. Nếu để trống, app dùng caption mẫu.
-- `AI_MODEL`: mặc định `claude-opus-5` (viết hay nhất); tiết kiệm hơn: `claude-sonnet-5`, `claude-haiku-4-5`.
-- `AI_BATCH=1` (mặc định): bài ngày mai được viết qua **Message Batches API**, giảm 50% chi phí.
+### 2. Claude AI
+Dán `ANTHROPIC_API_KEY`. Nếu để trống, app dùng nội dung mẫu. Chọn **Chế độ AI** trong *Cài đặt*:
+
+| Chế độ | Xếp ngành | Chữ trên ảnh/video (AI xem ảnh) | Viết bài | ≈ / bài | ≈ / bộ ảnh+video |
+|---|---|---|---|---|---|
+| **Tiết kiệm nhất** (mặc định) | Haiku 4.5 | Haiku 4.5, ảnh thu nhỏ 512px | Haiku 4.5 | ~35đ | ~110đ |
+| Cân bằng | Haiku 4.5 | Haiku 4.5 | Sonnet 5 (effort thấp) | ~110đ | ~110đ |
+| Chất lượng cao | Haiku 4.5 | Opus 5 | Opus 5 | ~380đ | ~1.250đ |
+
+Cách app tiết kiệm token: xếp ngành bằng từ khoá (0 token); Haiku không bật "suy nghĩ"; ảnh gửi AI thu nhỏ
+(≈350 token/ảnh thay vì ~800); AI soạn chữ **1 lần mỗi sản phẩm** rồi dùng lại cho mọi phiên bản ảnh/video;
+chỉnh ảnh + dựng video chạy trên máy chủ (0 token); bài hằng ngày viết qua **Batch API** (giảm 50%).
 
 ### 3. (Tuỳ chọn) Shopee Affiliate Open API
 Điền `SHOPEE_APP_ID`, `SHOPEE_APP_SECRET` nếu muốn app tự lấy tên / giá / ảnh / % hoa hồng từ link sản phẩm
@@ -96,6 +112,8 @@ và đồng bộ hoa hồng thật. Không bắt buộc: bạn tự nhập link 
 ### 4. Chạy tự động (cron trên VPS)
 
 ```cron
+# Xử lý nốt link Shopee đang chờ (nếu app khởi động lại giữa chừng)
+*/10 * * * * cd /opt/aff-pages && python -m app.jobs links
 # Tạo bộ ảnh + video cho sản phẩm mới (30 sản phẩm/lần, ~10-20 giây/sản phẩm), mỗi giờ từ 0h-5h
 0 0-5 * * *  cd /opt/aff-pages && python -m app.jobs media
 # AI viết bài cho ngày mai lúc 6h sáng (bạn duyệt trong ngày)
@@ -118,13 +136,13 @@ nên để ổ đĩa VPS đủ lớn. ffmpeg đã có sẵn qua thư viện `ima
 
 ## Chi phí mỗi tháng (ước tính, 3 bài/page/ngày, dùng Batch API)
 
-| Model | 80 page | 100 page | 250 page | 500 page |
+| Chế độ AI | 80 page | 100 page | 250 page | 500 page |
 |---|---|---|---|---|
-| Claude Opus 5 | ~2,8 triệu đ | ~3,4 triệu đ | ~8,5 triệu đ | ~17 triệu đ |
-| Claude Sonnet 5 | ~1,2 triệu đ | ~1,5 triệu đ | ~3,6 triệu đ | ~7,2 triệu đ |
-| Claude Haiku 4.5 | ~0,4 triệu đ | ~0,5 triệu đ | ~1,1 triệu đ | ~2,2 triệu đ |
+| Tiết kiệm nhất (Haiku 4.5) | ~0,5 triệu đ | ~0,6 triệu đ | ~1,4 triệu đ | ~2,8 triệu đ |
+| Cân bằng | ~1,1 triệu đ | ~1,3 triệu đ | ~3,1 triệu đ | ~6,1 triệu đ |
+| Chất lượng cao (Opus 5) | ~3,9 triệu đ | ~4,8 triệu đ | ~11,8 triệu đ | ~23,6 triệu đ |
 
-Đã gồm VPS (6–24 USD). Facebook API miễn phí. Bảng theo số page thật và **chi phí AI thật đo từ token**
+Gồm viết bài + tạo bộ ảnh/video (giả định mỗi sản phẩm được đăng ~10 lần) + VPS (8–32 USD). Facebook API miễn phí. Bảng theo số page thật và **chi phí AI thật đo từ token**
 nằm trong *Cài đặt → Chi phí*.
 
 ## Cấu trúc
@@ -145,7 +163,9 @@ app/
     designer.py        chỉnh ảnh + thiết kế ảnh 4:5 và khung 9:16 (Pillow, font Be Vietnam Pro)
     video_maker.py     dựng video ngắn (ffmpeg)
     pipeline.py        nhận diện page → tạo bài → đăng → đồng bộ số liệu
-    shopee.py          (tuỳ chọn) Shopee Affiliate Open API
+    shopee.py          nhận diện sản phẩm từ link Shopee (+ Open API tuỳ chọn)
+    quick_add.py       dán link -> nhận diện -> xếp ngành -> tạo ảnh + video (chạy nền)
+    ai_models.py       chọn model Claude theo từng việc (chế độ tiết kiệm / cân bằng / chất lượng)
     costs.py           ước tính chi phí
 tests/                 python -m pytest
 ```

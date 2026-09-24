@@ -3,15 +3,23 @@ import random
 import time
 
 from app import config
+from app.services import ai_models
 
-SYSTEM_PROMPT = """Bạn là người viết nội dung cho fanpage Facebook bán hàng tiếp thị liên kết Shopee tại Việt Nam.
+SYSTEM_PROMPT = """Bạn là người viết nội dung bán hàng cho fanpage Facebook tiếp thị liên kết Shopee tại Việt Nam.
+Mục tiêu: bài đọc tự nhiên, dừng được người đang lướt, khiến họ muốn bấm xem sản phẩm.
+
+Cấu trúc bài (60-120 chữ):
+1. Câu mở đầu gây chú ý (1 dòng): nêu đúng nỗi bất tiện hoặc mong muốn của người mua, hoặc một con số có thật trong dữ liệu (giá, lượt bán, đánh giá).
+2. 2-4 dòng lợi ích, mỗi dòng bắt đầu bằng 1 emoji, nói "được gì" chứ không chỉ liệt kê thông số.
+3. Bằng chứng xã hội nếu có trong dữ liệu (lượt bán, số sao). Không có thì bỏ qua.
+4. Lời kêu gọi ngắn ở cuối, nhắc xem giá / chọn phân loại ở link bên dưới.
+5. Tối đa 3 hashtag ngắn liên quan sản phẩm.
 
 Quy tắc bắt buộc:
-- Chỉ dùng thông tin sản phẩm được cung cấp. Không bịa công dụng, chứng nhận, khuyến mãi hay giá.
-- Không viết như thể page/người viết đã tự dùng sản phẩm ("mình dùng rồi", "review thật") và không tạo đánh giá giả.
-- Không hứa hẹn chữa bệnh, giảm cân, hay kết quả chắc chắn.
-- Không chèn link (hệ thống tự thêm link sau).
-- Viết tiếng Việt tự nhiên, 50–110 chữ, tối đa 4 emoji, có lời kêu gọi xem sản phẩm ở cuối.
+- Chỉ dùng thông tin được cung cấp. Không bịa công dụng, chứng nhận, khuyến mãi, % giảm giá, quà tặng hay giá.
+- Không viết như thể page đã tự dùng sản phẩm ("mình dùng rồi", "review thật"), không tạo đánh giá giả.
+- Không hứa chữa bệnh, giảm cân hay kết quả chắc chắn. Không tạo khan hiếm giả ("chỉ còn 2 suất").
+- Không chèn link (hệ thống tự thêm). Tối đa 5 emoji cả bài. Viết đúng giọng văn của page.
 - Chỉ trả về nội dung bài đăng, không giải thích thêm."""
 
 ANGLES = [
@@ -80,15 +88,14 @@ def _user_prompt(page: dict, product: dict, angle: str) -> dict:
 FALLBACK_MODELS = {"claude-opus-5", "claude-fable-5-1"}
 
 
-def _params(text: str) -> dict:
+def _params(text: str, model: str) -> dict:
     params = {
-        "model": config.AI_MODEL,
-        "max_tokens": 16000,
+        "model": model,
+        "max_tokens": 2000 if model.startswith("claude-haiku") else 16000,
         "system": SYSTEM_PROMPT,
         "messages": [{"role": "user", "content": text}],
     }
-    if not config.AI_MODEL.startswith("claude-haiku"):
-        params["output_config"] = {"effort": config.AI_EFFORT}
+    params.update(ai_models.request_options(model))
     return params
 
 
@@ -108,9 +115,10 @@ def _client():
 def _claude_one(text: str, record_usage) -> tuple[str | None, str | None]:
     import anthropic
 
-    params = _params(text)
+    model = ai_models.model_for("caption")
+    params = _params(text, model)
     try:
-        if config.AI_MODEL in FALLBACK_MODELS:
+        if model in FALLBACK_MODELS:
             msg = _client().beta.messages.create(
                 **params, betas=["server-side-fallback-2026-07-01"], fallbacks="default")
         else:
@@ -125,8 +133,9 @@ def _claude_one(text: str, record_usage) -> tuple[str | None, str | None]:
 def _claude_batch(texts: list[str], record_usage, poll_seconds: int = 30,
                   max_wait_seconds: int = 6 * 3600) -> list[tuple[str | None, str | None]]:
     client = _client()
+    model = ai_models.model_for("caption")
     batch = client.messages.batches.create(
-        requests=[{"custom_id": str(i), "params": _params(t)} for i, t in enumerate(texts)])
+        requests=[{"custom_id": str(i), "params": _params(t, model)} for i, t in enumerate(texts)])
     waited = 0
     while batch.processing_status != "ended":
         if waited >= max_wait_seconds:

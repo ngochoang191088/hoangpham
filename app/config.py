@@ -32,6 +32,8 @@ FB_GRAPH_VERSION = os.getenv("FB_GRAPH_VERSION", "v23.0")
 
 SHOPEE_APP_ID = os.getenv("SHOPEE_APP_ID", "")
 SHOPEE_APP_SECRET = os.getenv("SHOPEE_APP_SECRET", "")
+# Tự đọc thông tin + ảnh sản phẩm từ link Shopee (0 = tắt, dùng khi máy chủ không ra được Internet)
+SHOPEE_FETCH = os.getenv("SHOPEE_FETCH", "1") == "1"
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 AI_MODEL = os.getenv("AI_MODEL", "claude-opus-5")

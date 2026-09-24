@@ -13,6 +13,8 @@
   <b>3-5 ảnh 4:5 đã chỉnh</b> + <b>1 video ngắn 9:16</b>. Mỗi sản phẩm có nhiều phiên bản khác màu / bố cục để các page không đăng ảnh giống hệt nhau.
   Link aff chỉ được gắn vào bài viết hoặc bình luận.</p>
 
+{% include "_quick_add.html" %}
+
 <div class="row" style="gap:6px; margin-bottom:12px">
   {% for k, v in {'': 'Tất cả', 'none': 'Chưa tạo', 'processing': 'Đang tạo', 'ready': 'Đã xong', 'error': 'Lỗi'}.items() %}
     <a class="pill {{ 'published' if status == k else 'niche' }}" href="?status={{ k }}&niche={{ niche | urlencode }}">

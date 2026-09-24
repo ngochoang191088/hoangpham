@@ -113,3 +113,58 @@ def save_upload(filename: str, data: bytes) -> str:
     path = folder / f"{uuid.uuid4().hex[:8]}_{safe}{ext}"
     path.write_bytes(data)
     return str(path)
+
+
+def guess_niche(conn, name: str, categories: list[str] | None = None, description: str = "",
+                record_usage=None) -> tuple[str, str]:
+    """Đoán ngành hàng cho sản phẩm. Trả về (ngành, cách đoán).
+
+    1. Miễn phí: so từ khoá của từng ngành (và tên ngành) với tên sản phẩm + danh mục Shopee.
+    2. Chỉ khi không đoán được mới hỏi AI (model rẻ nhất, trả lời 1 lựa chọn trong danh sách).
+    """
+    niches = db.get_niches(conn)
+    if not niches:
+        return "", ""
+    text = importer.strip_accents(" ".join([name, *(categories or [])]))
+    best, best_score = "", 0.0
+    for n in niches:
+        score = 0.0
+        for kw in n["keywords"]:
+            k = importer.strip_accents(kw)
+            if k and k in text:
+                score += 2 + len(k.split())                # từ khoá nhiều chữ khớp -> chắc chắn hơn
+        for word in importer.strip_accents(n["name"]).replace("&", " ").split():
+            if len(word) > 2 and f" {word} " in f" {text} ":
+                score += 0.5
+        if score > best_score:
+            best, best_score = n["name"], score
+    if best_score >= 2:
+        return best, "từ khoá"
+    if not config.AI_ENABLED:
+        return "", ""
+    return _ai_niche(name, categories or [], description, [n["name"] for n in niches], record_usage), "AI"
+
+
+def _ai_niche(name: str, categories: list[str], description: str, options: list[str], record_usage=None) -> str:
+    import json
+
+    import anthropic
+
+    from app.services import ai_models
+
+    model = ai_models.model_for("classify")
+    msg = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY).messages.create(
+        model=model, max_tokens=200,
+        messages=[{"role": "user", "content": (
+            f"Xếp sản phẩm Shopee vào 1 ngành hàng.\nSản phẩm: {name}\nDanh mục: {', '.join(categories) or '-'}\n"
+            f"Mô tả: {description[:400]}")}],
+        output_config={"format": {"type": "json_schema", "schema": {
+            "type": "object", "properties": {"niche": {"type": "string", "enum": [*options, "Khác"]}},
+            "required": ["niche"], "additionalProperties": False}}},
+    )
+    if record_usage:
+        record_usage(msg.model, msg.usage.input_tokens, msg.usage.output_tokens, False)
+    if msg.stop_reason == "refusal":
+        return ""
+    niche = json.loads(next(b.text for b in msg.content if b.type == "text"))["niche"]
+    return niche if niche in options else ""
