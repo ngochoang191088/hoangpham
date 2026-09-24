@@ -60,6 +60,12 @@ AI viết bài, app tự đăng **video** (nếu sản phẩm có video) hoặc 
 
 ## Chạy thử ngay (DEMO)
 
+**Cách nhanh nhất:** cài [Python 3.11+](https://www.python.org/downloads/) (Windows: tick *Add python.exe to PATH*),
+giải nén file zip, rồi nháy đúp **`run_windows.bat`** (Windows) hoặc chạy `bash run_mac_linux.sh` (Mac/Linux).
+Trình duyệt tự mở http://localhost:8000, mật khẩu demo: **`admin123`** (đổi trong file `.env`).
+
+Chạy tay:
+
 Chưa cần Facebook App: app giả lập 1 tài khoản có 82 page, sản phẩm, video và 30 ngày số liệu.
 
 ```bash
