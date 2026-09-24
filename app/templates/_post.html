@@ -1,43 +1,91 @@
-{# Một bài đăng. Cần biến: r (post), show_page (bool) #}
-<div class="post">
-  {% set kimgs = (r.kit_images | loads) if r.kit_images else [] %}
-  {% if r.media_type == 'kit_video' and r.kit_video %}<video src="{{ r.kit_video | media }}" preload="none" controls poster="{{ (kimgs[0] | media) if kimgs else '' }}" style="width:120px; aspect-ratio:9/16; object-fit:cover; border-radius:8px; background:#000"></video>
+{# Một bài đăng. Cần: r (post), show_page (bool). Tuỳ chọn: kits_by_item, media_types, rewrite_presets, editor_open #}
+{% set kimgs = (r.custom_images | loads) if r.custom_images else ((r.kit_images | loads) if r.kit_images else []) %}
+{% set editable = r.status in ('pending', 'approved') %}
+<div class="post" id="post-{{ r.id }}">
+  <div>
+  {% if r.media_type == 'ai_video' and r.kit_ai_video %}<video src="{{ r.kit_ai_video | media }}" preload="none" controls style="width:120px; aspect-ratio:9/16; object-fit:cover; border-radius:8px; background:#000"></video>
+  {% elif r.media_type in ('kit_video', 'ai_video') and r.kit_video %}<video src="{{ r.kit_video | media }}" preload="none" controls poster="{{ (kimgs[0] | media) if kimgs else '' }}" style="width:120px; aspect-ratio:9/16; object-fit:cover; border-radius:8px; background:#000"></video>
   {% elif r.media_type == 'album' and kimgs %}<div style="display:grid; grid-template-columns:1fr 1fr; gap:3px; width:120px; align-content:start">
       {% for k in kimgs[:4] %}<img src="{{ k | media }}" alt="" loading="lazy" style="width:100%; height:auto; aspect-ratio:4/5; border-radius:4px">{% endfor %}</div>
-  {% elif r.image_url %}<img src="{{ r.image_url }}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">{% else %}<div></div>{% endif %}
+      {% if kimgs | length > 4 %}<div class="small muted">+{{ kimgs | length - 4 }} ảnh</div>{% endif %}
+  {% elif r.image_url %}<img src="{{ r.image_url }}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">{% endif %}
+  </div>
   <div>
     <div class="row">
       <span class="pill {{ r.status }}">{{ {'published':'Đã đăng','pending':'Chờ duyệt','approved':'Đã duyệt','rejected':'Từ chối','failed':'Lỗi'}[r.status] }}</span>
       {% if show_page %}<a href="/pages/{{ r.page_id }}"><b>{{ r.page_name }}</b></a>{% endif %}
       {% if r.source == 'facebook' %}<span class="pill niche">Đăng ngoài app</span>
-      {% else %}<span class="pill niche">{{ {'video':'🎬 Video riêng','kit_video':'🎬 Video app tạo','album':'🖼 Album ảnh'}.get(r.media_type, '🖼 1 ảnh') }}</span>{% endif %}
+      {% else %}<span class="pill niche">{{ {'video':'🎬 Video riêng','kit_video':'🎬 Video trình chiếu','ai_video':'🎬 Video AI','album':'🖼 Album ' ~ (kimgs | length) ~ ' ảnh'}.get(r.media_type, '🖼 1 ảnh') }}</span>{% endif %}
       <span class="muted small">
         {% if r.published_at %}Đăng lúc {{ r.published_at[:16].replace('T',' ') }}{% elif r.scheduled_at %}Lịch đăng {{ r.scheduled_at[:16].replace('T',' ') }}{% endif %}
       </span>
     </div>
-    {% if r.product_name %}<div class="small muted">Sản phẩm: {{ r.product_name }}</div>{% endif %}
+    {% if r.product_name %}<div class="small muted">Sản phẩm: {% if r.item_id %}<a href="/studio/{{ r.item_id | urlencode }}">{{ r.product_name }}</a>{% else %}{{ r.product_name }}{% endif %}</div>{% endif %}
     {% set flags = r.flags | loads %}
     {% for f in flags %}<div class="flag">⚠ {{ f }}</div>{% endfor %}
-    {% if r.status in ('pending', 'approved') %}
-      <form method="post" action="/posts/{{ r.id }}/edit">
-        <textarea name="caption">{{ r.caption }}</textarea>
-        <div class="actions"><button>Lưu nội dung</button>
+
+    {% if editable and media_types is defined %}
+    {% set kits = (kits_by_item or {}).get(r.item_id, []) %}
+    <details class="editor" {{ 'open' if editor_open }} style="margin-top:6px">
+      <summary class="small" style="cursor:pointer"><b>✏️ Sửa bài</b></summary>
+      <form method="post" action="/posts/{{ r.id }}/edit" class="form-grid" style="grid-template-columns:1fr; margin-top:8px">
+        <label>Nội dung bài <span class="muted" data-count-for="cap-{{ r.id }}"></span>
+          <textarea name="caption" id="cap-{{ r.id }}" oninput="countChars(this)">{{ r.caption }}</textarea></label>
+        <div class="form-grid" style="grid-template-columns: repeat(auto-fit, minmax(190px, 1fr))">
+          <label>Đăng dạng<select name="media_type">
+            {% for k, v in media_types.items() %}
+              {% set ok = (k in ('album', 'kit_video') and kits) or (k == 'ai_video' and kits | selectattr('ai_video_status', 'equalto', 'ready') | list)
+                          or (k == 'video' and r.video_id) or (k == 'photo') %}
+              {% if ok %}<option value="{{ k }}" {{ 'selected' if k == r.media_type }}>{{ v }}</option>{% endif %}
+            {% endfor %}</select></label>
+          <label>Giờ đăng<input type="datetime-local" name="scheduled_at" value="{{ (r.scheduled_at or '')[:16] }}"></label>
+          <label>Link aff (gắn vào bài / bình luận)<input name="aff_link" value="{{ r.aff_link }}"></label>
+        </div>
+        {% if kits %}
+        <div class="small muted">Phiên bản ảnh / video và ảnh đưa vào album (bỏ tick ảnh không muốn đăng):</div>
+        {% for k in kits %}
+          <div class="row" style="align-items:center; gap:6px">
+            <label class="row small" style="flex-direction:row; min-width:110px"><input type="radio" name="kit_id" value="{{ k.id }}" {{ 'checked' if k.id == r.kit_id or (not r.kit_id and loop.first) }}> Phiên bản {{ k.variant + 1 }}{% if k.ai_video_status == 'ready' %} · 🎬AI{% endif %}</label>
+            {% set chosen = (r.custom_images | loads) if (r.custom_images and k.id == r.kit_id) else k.images %}
+            {% for img in k.images %}
+              <label title="Ảnh {{ loop.index }}" style="display:inline-flex; flex-direction:column; align-items:center">
+                <img src="{{ img | media }}" alt="" loading="lazy" style="width:52px; aspect-ratio:4/5; border-radius:4px; border:1px solid var(--line)">
+                <input type="checkbox" name="img_{{ k.id }}" value="{{ img }}" {{ 'checked' if img in chosen }}></label>
+            {% endfor %}
+          </div>
+        {% endfor %}
+        {% endif %}
+        <div class="actions">
+          <button>💾 Lưu</button>
+          {% if r.status == 'pending' %}<button class="ok" name="approve" value="1">💾 Lưu & duyệt</button>{% endif %}
+          {% if r.aff_link %}<a class="small" href="{{ r.aff_link }}" target="_blank" rel="noopener">🔗 Mở link aff</a>{% endif %}
+        </div>
+      </form>
+      <form method="post" action="/posts/{{ r.id }}/rewrite" class="row" style="margin-top:8px">
+        <span class="small">🤖 AI sửa bài:</span>
+        <select name="preset">{% for k, v in rewrite_presets.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select>
+        <input name="instruction" placeholder="Yêu cầu thêm (ví dụ: thêm ý giao hàng nhanh)" style="flex:1; min-width:200px">
+        <button>Viết lại</button>
+      </form>
+    </details>
+    {% elif editable %}
+      <div class="caption">{{ r.caption }}</div>
     {% else %}
       <div class="caption">{{ r.caption }}</div>
-      <div class="actions">
     {% endif %}
-        {% if r.aff_link %}<a class="small" href="{{ r.aff_link }}" target="_blank" rel="noopener">🔗 Link aff</a>{% endif %}
-        {% if r.permalink %}<a class="small" href="{{ r.permalink }}" target="_blank" rel="noopener">Xem trên Facebook ↗</a>{% endif %}
-    {% if r.status in ('pending', 'approved') %}</div></form><div class="actions">{% endif %}
-        {% if r.status == 'pending' %}
-          <form class="inline" method="post" action="/posts/{{ r.id }}/approve"><button class="ok">✓ Duyệt</button></form>
-          <form class="inline" method="post" action="/posts/{{ r.id }}/reject"><button>✕ Từ chối</button></form>
-        {% elif r.status == 'approved' %}
-          <form class="inline" method="post" action="/posts/{{ r.id }}/unapprove"><button>↩ Bỏ duyệt</button></form>
-        {% elif r.status == 'failed' %}
-          <form class="inline" method="post" action="/posts/{{ r.id }}/retry"><button>↻ Thử đăng lại</button></form>
-        {% endif %}
-      </div>
+
+    <div class="actions">
+      {% if not editable and r.aff_link %}<a class="small" href="{{ r.aff_link }}" target="_blank" rel="noopener">🔗 Link aff</a>{% endif %}
+      {% if r.permalink %}<a class="small" href="{{ r.permalink }}" target="_blank" rel="noopener">Xem trên Facebook ↗</a>{% endif %}
+      {% if r.status == 'pending' %}
+        <form class="inline" method="post" action="/posts/{{ r.id }}/approve"><button class="ok">✓ Duyệt</button></form>
+        <form class="inline" method="post" action="/posts/{{ r.id }}/reject"><button>✕ Từ chối</button></form>
+      {% elif r.status == 'approved' %}
+        <form class="inline" method="post" action="/posts/{{ r.id }}/unapprove"><button>↩ Bỏ duyệt</button></form>
+      {% elif r.status == 'failed' %}
+        <form class="inline" method="post" action="/posts/{{ r.id }}/retry"><button>↻ Thử đăng lại</button></form>
+      {% endif %}
+    </div>
     {% if r.error %}<div class="flag">Lỗi: {{ r.error }}</div>{% endif %}
     {% if r.status == 'published' %}
       <div class="meta">

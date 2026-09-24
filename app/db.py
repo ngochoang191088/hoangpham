@@ -48,9 +48,10 @@ CREATE TABLE IF NOT EXISTS posts (
     source TEXT NOT NULL DEFAULT 'app',       -- app | facebook (đăng ngoài app)
     caption TEXT NOT NULL DEFAULT '',
     image_url TEXT NOT NULL DEFAULT '',
-    media_type TEXT NOT NULL DEFAULT 'photo', -- photo | album (bộ ảnh app tạo) | kit_video (video app tạo) | video (video của bạn)
+    media_type TEXT NOT NULL DEFAULT 'photo', -- photo | album (bộ ảnh app tạo) | kit_video (video trình chiếu) | ai_video (video Veo) | video (video của bạn)
     video_id INTEGER,
     kit_id INTEGER,
+    custom_images TEXT,                       -- album: chỉ đăng các ảnh bạn chọn (JSON), trống = cả bộ
     aff_link TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'pending',   -- pending | approved | rejected | published | failed
     flags TEXT NOT NULL DEFAULT '[]',         -- cảnh báo kiểm duyệt tự động (JSON)
@@ -270,7 +271,8 @@ def init_db() -> None:
 MIGRATIONS = {
     "products": {"aff_link": "TEXT NOT NULL DEFAULT ''", "description": "TEXT NOT NULL DEFAULT ''",
                  "source": "TEXT NOT NULL DEFAULT 'manual'", "sample_caption": "TEXT NOT NULL DEFAULT ''"},
-    "posts": {"media_type": "TEXT NOT NULL DEFAULT 'photo'", "video_id": "INTEGER", "kit_id": "INTEGER"},
+    "posts": {"media_type": "TEXT NOT NULL DEFAULT 'photo'", "video_id": "INTEGER", "kit_id": "INTEGER",
+              "custom_images": "TEXT"},
     "link_jobs": {"ai_video": "INTEGER NOT NULL DEFAULT 0"},
     "media_kits": {"ai_video_status": "TEXT NOT NULL DEFAULT ''", "ai_video_path": "TEXT NOT NULL DEFAULT ''",
                    "ai_video_error": "TEXT", "ai_video_model": "TEXT NOT NULL DEFAULT ''"},

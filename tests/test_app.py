@@ -621,8 +621,65 @@ def test_ai_video_in_studio_and_posts(client):
         assert tuple(conn.execute("SELECT seconds, simulated FROM video_usage").fetchone()) == (8, 1)
         page_id = conn.execute("SELECT id FROM pages WHERE status = 'active' LIMIT 1").fetchone()[0]
         conn.execute("UPDATE media_kits SET status = 'error' WHERE item_id = ? AND variant != 0", (item_id,))
-        assert pipeline.pick_media(conn, item_id, page_id, "alternate", 0)[0] == "kit_video"
+        assert pipeline.pick_media(conn, item_id, page_id, "alternate", 0)[0] == "ai_video"
         assert pipeline.pick_media(conn, item_id, page_id, "album", 0)[0] == "album"
         conn.execute("UPDATE media_kits SET status = 'ready' WHERE item_id = ?", (item_id,))
     html = client.get(f"/studio/{item_id}").text
     assert "video_ai.mp4" in html and "Video AI (Veo 3.1)" in html
+
+
+def test_post_editor_in_review(client, monkeypatch):
+    """Duyệt bài: sửa nội dung, đổi dạng đăng, chọn phiên bản + ảnh album, giờ đăng, link aff, AI viết lại."""
+    with db.get_conn() as conn:
+        kit = conn.execute("SELECT * FROM media_kits WHERE status = 'ready' ORDER BY variant DESC LIMIT 1").fetchone()
+        page_id = conn.execute("SELECT id FROM pages WHERE status = 'active' LIMIT 1").fetchone()[0]
+        now = db.now_iso()
+        post_id = conn.execute(
+            """INSERT INTO posts(page_id, item_id, caption, media_type, status, scheduled_at, aff_link, created_at,
+                   updated_at) VALUES (?, ?, 'Bài cũ #tiepthilienket', 'photo', 'pending', ?, 'https://s.shopee.vn/old',
+                   ?, ?)""", (page_id, kit["item_id"], now, now, now)).lastrowid
+    imgs = json.loads(kit["images"])
+    html = client.get(f"/review?page_id={page_id}").text
+    assert f'id="post-{post_id}"' in html and "✏️ Sửa bài" in html and "Lưu & duyệt" in html
+    r = client.post(f"/posts/{post_id}/edit", data={
+        "caption": "Nội dung mới do mình sửa #tiepthilienket", "media_type": "album", "kit_id": str(kit["id"]),
+        f"img_{kit['id']}": imgs[:2], "scheduled_at": "2030-01-02T09:30", "aff_link": "https://s.shopee.vn/new",
+        "approve": "1"})
+    assert "Đã lưu và duyệt bài" in r.text
+    with db.get_conn() as conn:
+        p = conn.execute("SELECT * FROM posts WHERE id = ?", (post_id,)).fetchone()
+    assert p["caption"] == "Nội dung mới do mình sửa #tiepthilienket" and p["status"] == "approved"
+    assert (p["media_type"], p["kit_id"]) == ("album", kit["id"]) and json.loads(p["custom_images"]) == imgs[:2]
+    assert p["scheduled_at"].startswith("2030-01-02T09:30") and p["aff_link"] == "https://s.shopee.vn/new"
+
+    # Ảnh không thuộc bộ media bị bỏ qua; chọn đủ ảnh = đăng cả bộ
+    client.post(f"/posts/{post_id}/edit", data={"caption": p["caption"], "media_type": "album",
+                                                "kit_id": str(kit["id"]), f"img_{kit['id']}": imgs + ["/etc/passwd"]})
+    with db.get_conn() as conn:
+        assert conn.execute("SELECT custom_images FROM posts WHERE id = ?", (post_id,)).fetchone()[0] is None
+        conn.execute("UPDATE posts SET custom_images = ? WHERE id = ?", (json.dumps(imgs[:2]), post_id))
+        # Đăng: album chỉ gồm ảnh đã chọn
+        sent = {}
+        monkeypatch.setattr(pipeline.facebook, "publish",
+                            lambda page, caption, link, image_url="", video=None, images=None:
+                            sent.update(images=images, link=link, caption=caption) or {"fb_post_id": "x1", "permalink": ""})
+        conn.execute("UPDATE posts SET scheduled_at = ? WHERE id = ?", (db.now_iso(), post_id))
+        conn.execute("UPDATE posts SET status = 'rejected' WHERE status = 'approved' AND id != ?", (post_id,))
+        pipeline.publish_due(conn)
+    assert sent == {"images": imgs[:2], "link": "https://s.shopee.vn/new",
+                    "caption": "Nội dung mới do mình sửa #tiepthilienket"}
+
+    # AI viết lại (demo: dùng mẫu), bài bị gắn cờ lại nếu vi phạm
+    with db.get_conn() as conn:
+        conn.execute("UPDATE posts SET status = 'pending' WHERE id = ?", (post_id,))
+    r = client.post(f"/posts/{post_id}/rewrite", data={"preset": "shorter", "instruction": "thêm ý giao nhanh"})
+    assert "AI đã viết lại bài" in r.text
+    with db.get_conn() as conn:
+        new_caption = conn.execute("SELECT caption FROM posts WHERE id = ?", (post_id,)).fetchone()[0]
+    assert new_caption != "Nội dung mới do mình sửa #tiepthilienket" and new_caption.endswith("#tiepthilienket")
+    # Bài đã đăng thì không sửa được
+    with db.get_conn() as conn:
+        conn.execute("UPDATE posts SET status = 'published' WHERE id = ?", (post_id,))
+    client.post(f"/posts/{post_id}/edit", data={"caption": "hack"})
+    with db.get_conn() as conn:
+        assert conn.execute("SELECT caption FROM posts WHERE id = ?", (post_id,)).fetchone()[0] == new_caption

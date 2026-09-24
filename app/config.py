@@ -19,7 +19,7 @@ def _load_dotenv() -> None:
 _load_dotenv()
 
 ADMIN_USER = os.getenv("ADMIN_USER", "admin")
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
 
 # Đăng nhập bằng Facebook cá nhân: app tự nhận diện mọi page tài khoản đang quản lý
 FB_APP_ID = os.getenv("FB_APP_ID", "")

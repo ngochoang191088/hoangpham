@@ -35,5 +35,12 @@
   {% if request.query_params.get('msg') %}<div class="alert {{ 'error' if request.query_params.get('err') else 'ok' }}">{{ request.query_params.get('msg') }}</div>{% endif %}
   {% block content %}{% endblock %}
 </main>
+<script>
+function countChars(t) {
+  const el = document.querySelector('[data-count-for="' + t.id + '"]');
+  if (el) el.textContent = '(' + t.value.length + ' ký tự, ' + t.value.trim().split(/\s+/).filter(Boolean).length + ' chữ)';
+}
+document.querySelectorAll('textarea[oninput]').forEach(countChars);
+</script>
 </body>
 </html>

@@ -76,6 +76,28 @@ def write_captions(jobs: list[dict], disclosure: str, record_usage=None) -> list
     return [(f"{t.strip()}\n\n{disclosure}" if t else None, err) for t, err in texts]
 
 
+REWRITE_PRESETS = {
+    "shorter": "Viết ngắn gọn hơn (khoảng 50-70 chữ), giữ ý chính.",
+    "fun": "Viết vui, trẻ trung, gần gũi hơn.",
+    "price": "Nhấn mạnh giá và lợi ích tiết kiệm (chỉ dùng giá có trong dữ liệu).",
+    "hook": "Viết lại câu mở đầu thật cuốn hút, phần còn lại giữ nguyên ý.",
+    "new": "Viết một bài hoàn toàn mới với góc viết khác.",
+}
+
+
+def rewrite_caption(page: dict, product: dict, caption: str, instruction: str, disclosure: str,
+                    record_usage=None) -> tuple[str | None, str | None]:
+    """AI sửa lại 1 bài theo yêu cầu. Trả về (bài mới, lỗi)."""
+    body = caption.replace(disclosure, "").strip()
+    if not config.AI_ENABLED:
+        text = _template_caption(product, random.choice(ANGLES))
+        return f"{text}\n\n{disclosure}", None
+    prompt = (_user_prompt(page, product, "giữ góc viết của bài hiện tại")["text"]
+              + f"\n\nBài hiện tại:\n{body}\n\nYêu cầu sửa: {instruction}")
+    text, error = _claude_one(prompt, record_usage)
+    return (f"{text.strip()}\n\n{disclosure}" if text else None), error
+
+
 def _user_prompt(page: dict, product: dict, angle: str) -> dict:
     text = (
         f"Page: {page['name']} (ngành hàng: {page['niche']}; giọng văn: {page['tone']})\n"

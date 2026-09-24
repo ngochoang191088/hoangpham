@@ -472,7 +472,7 @@ def page_detail(request: Request, page_id: str, status_: str = "published", days
         order = "posts.scheduled_at ASC" if status_ in ("pending", "approved") \
         else "COALESCE(posts.published_at, posts.scheduled_at) DESC"
         posts = conn.execute(
-            f"""SELECT posts.*, products.name AS product_name, kits.images AS kit_images, CASE WHEN kits.ai_video_status = 'ready' THEN kits.ai_video_path ELSE kits.video_path END AS kit_video, products.commission_rate
+            f"""SELECT posts.*, products.name AS product_name, kits.images AS kit_images, kits.video_path AS kit_video, CASE WHEN kits.ai_video_status = 'ready' THEN kits.ai_video_path END AS kit_ai_video, products.commission_rate
                 FROM posts LEFT JOIN products ON products.item_id = posts.item_id
                 LEFT JOIN media_kits kits ON kits.id = posts.kit_id
                 WHERE posts.page_id = ? AND posts.status = ? ORDER BY {order} LIMIT 30""",
@@ -481,9 +481,11 @@ def page_detail(request: Request, page_id: str, status_: str = "published", days
         niches = db.niche_names(conn)
         activity = conn.execute(
             "SELECT * FROM activity WHERE page_id = ? ORDER BY id DESC LIMIT 10", (page_id,)).fetchall()
+        kits = _kits_for(conn, posts)
     chart = {"labels": [r["day"][5:] for r in daily], "commission": [round(r["commission"] or 0) for r in daily],
              "posts": [r["posts"] for r in daily]}
-    return render(request, "page_detail.html", page=page, stats=stats, chart=chart, posts=posts,
+    return render(request, "page_detail.html", kits_by_item=kits, media_types=MEDIA_TYPES,
+                  rewrite_presets=REWRITE_LABELS, page=page, stats=stats, chart=chart, posts=posts,
                   counts=counts, status_=status_, niches=niches, activity=activity, days=days)
 
 
@@ -553,7 +555,7 @@ def posts_list(request: Request, status: str = "published", page_id: str = "", n
             f"SELECT COUNT(*) FROM posts JOIN pages ON pages.id = posts.page_id WHERE {' AND '.join(where)}",
             args).fetchone()[0]
         rows = conn.execute(
-            f"""SELECT posts.*, pages.name AS page_name, pages.niche, products.name AS product_name, kits.images AS kit_images, CASE WHEN kits.ai_video_status = 'ready' THEN kits.ai_video_path ELSE kits.video_path END AS kit_video
+            f"""SELECT posts.*, pages.name AS page_name, pages.niche, products.name AS product_name, kits.images AS kit_images, kits.video_path AS kit_video, CASE WHEN kits.ai_video_status = 'ready' THEN kits.ai_video_path END AS kit_ai_video
                 FROM posts JOIN pages ON pages.id = posts.page_id
                 LEFT JOIN products ON products.item_id = posts.item_id
                 LEFT JOIN media_kits kits ON kits.id = posts.kit_id
@@ -563,7 +565,8 @@ def posts_list(request: Request, status: str = "published", page_id: str = "", n
         ).fetchall()
         pages = conn.execute("SELECT id, name FROM pages ORDER BY name").fetchall()
         niches = db.niche_names(conn)
-    return render(request, "posts.html", rows=rows, total=total, pages=pages, niches=niches, status=status,
+        kits = _kits_for(conn, rows)
+    return render(request, "posts.html", kits_by_item=kits, media_types=MEDIA_TYPES, rewrite_presets=REWRITE_LABELS, rows=rows, total=total, pages=pages, niches=niches, status=status,
                   page_id=page_id, niche=niche, q=q, day=day, flagged=flagged, p=max(p, 1), per=per)
 
 
@@ -576,7 +579,7 @@ def review(request: Request, page_id: str = "", flagged: int = 0):
         where.append("posts.flags != '[]'")
     with db.get_conn() as conn:
         rows = conn.execute(
-            f"""SELECT posts.*, pages.name AS page_name, pages.niche, products.name AS product_name, kits.images AS kit_images, CASE WHEN kits.ai_video_status = 'ready' THEN kits.ai_video_path ELSE kits.video_path END AS kit_video,
+            f"""SELECT posts.*, pages.name AS page_name, pages.niche, products.name AS product_name, kits.images AS kit_images, kits.video_path AS kit_video, CASE WHEN kits.ai_video_status = 'ready' THEN kits.ai_video_path END AS kit_ai_video,
                   products.price, products.commission_rate, products.rating, products.sales
                 FROM posts JOIN pages ON pages.id = posts.page_id
                 LEFT JOIN products ON products.item_id = posts.item_id
@@ -585,17 +588,104 @@ def review(request: Request, page_id: str = "", flagged: int = 0):
             args,
         ).fetchall()
         clean = conn.execute("SELECT COUNT(*) FROM posts WHERE status='pending' AND flags='[]'").fetchone()[0]
-    return render(request, "review.html", rows=rows, clean=clean, flagged=flagged)
+        kits = _kits_for(conn, rows)
+    return render(request, "review.html", rows=rows, clean=clean, flagged=flagged, kits_by_item=kits,
+                  editor_open=True, media_types=MEDIA_TYPES, rewrite_presets=REWRITE_LABELS)
+
+
+def _kits_for(conn, rows) -> dict[str, list]:
+    """Các bộ media đã xong của những sản phẩm trong danh sách bài (để chọn trong trình sửa bài)."""
+    items = sorted({r["item_id"] for r in rows if r["item_id"] and r["status"] in ("pending", "approved")})
+    if not items:
+        return {}
+    marks = ",".join("?" * len(items))
+    out: dict[str, list] = {}
+    for k in conn.execute(f"""SELECT id, item_id, variant, images, video_path, ai_video_status, ai_video_path
+                              FROM media_kits WHERE status = 'ready' AND item_id IN ({marks})
+                              ORDER BY variant""", items):
+        out.setdefault(k["item_id"], []).append({**dict(k), "images": json.loads(k["images"])})
+    return out
+
+
+MEDIA_TYPES = {"album": "Album ảnh", "kit_video": "Video trình chiếu", "ai_video": "Video AI (Veo)",
+               "video": "Video riêng của bạn", "photo": "1 ảnh sản phẩm"}
+REWRITE_LABELS = {"shorter": "Ngắn gọn hơn", "fun": "Vui, trẻ trung hơn", "price": "Nhấn mạnh giá",
+                  "hook": "Câu mở đầu cuốn hút hơn", "new": "Viết bài mới hoàn toàn"}
 
 
 @app.post("/posts/{post_id}/edit")
-def post_edit(request: Request, post_id: int, caption: str = Form(...)):
+async def post_edit(request: Request, post_id: int):
+    """Sửa bài trước khi đăng: nội dung, cách đăng (album / video / ảnh), phiên bản, ảnh trong album,
+    giờ đăng, link aff. Nút "Lưu & duyệt" thì duyệt luôn."""
+    form = await request.form()
     with db.get_conn() as conn:
+        post = conn.execute("SELECT * FROM posts WHERE id = ? AND status IN ('pending', 'approved')",
+                            (post_id,)).fetchone()
+        if not post:
+            return back(request)
+        caption = str(form.get("caption", post["caption"])).strip()
         s = db.get_settings(conn)
         flags = ai_writer.check_content(caption, s, [])
-        conn.execute("UPDATE posts SET caption=?, flags=?, updated_at=? WHERE id=? AND status IN ('pending','approved')",
+        media_type, kit_id, custom = post["media_type"], post["kit_id"], post["custom_images"]
+        if form.get("media_type") in MEDIA_TYPES:
+            media_type = str(form["media_type"])
+        if form.get("kit_id"):
+            kit = conn.execute("SELECT * FROM media_kits WHERE id = ? AND item_id = ? AND status = 'ready'",
+                               (int(form["kit_id"]), post["item_id"])).fetchone()
+            if kit:
+                kit_id = kit["id"]
+                allowed = json.loads(kit["images"])
+                picked = [p for p in form.getlist(f"img_{kit_id}") if p in allowed]
+                custom = json.dumps(picked) if picked and len(picked) < len(allowed) else None
+                if media_type == "ai_video" and kit["ai_video_status"] != "ready":
+                    media_type = "kit_video"
+        if media_type in ("album", "kit_video", "ai_video") and not kit_id:
+            media_type = "photo"
+        if media_type == "video" and not post["video_id"]:
+            media_type = "photo"
+        scheduled = post["scheduled_at"]
+        if form.get("scheduled_at"):
+            try:
+                from datetime import datetime
+                scheduled = datetime.fromisoformat(str(form["scheduled_at"])).replace(tzinfo=config.TZ).isoformat()
+            except ValueError:
+                pass
+        aff = str(form.get("aff_link", post["aff_link"])).strip()
+        status = "approved" if form.get("approve") else post["status"]
+        conn.execute(
+            """UPDATE posts SET caption=?, flags=?, media_type=?, kit_id=?, custom_images=?, scheduled_at=?,
+                   aff_link=?, status=?, updated_at=? WHERE id=?""",
+            (caption, json.dumps(flags, ensure_ascii=False), media_type, kit_id, custom, scheduled, aff, status,
+             db.now_iso(), post_id))
+    msg = "Đã lưu và duyệt bài" if form.get("approve") else "Đã lưu bài"
+    if flags:
+        msg += " (còn cảnh báo: " + "; ".join(flags) + ")"
+    return RedirectResponse(_with_msg(request.headers.get("referer") or "/review", msg) + f"#post-{post_id}", 303)
+
+
+@app.post("/posts/{post_id}/rewrite")
+def post_rewrite(request: Request, post_id: int, preset: str = Form("new"), instruction: str = Form("")):
+    """AI sửa lại nội dung bài theo yêu cầu (ngắn hơn, vui hơn, nhấn giá...)."""
+    with db.get_conn() as conn:
+        post = conn.execute("""SELECT posts.*, pages.name AS page_name, pages.niche, pages.tone FROM posts
+                               JOIN pages ON pages.id = posts.page_id
+                               WHERE posts.id = ? AND posts.status IN ('pending', 'approved')""", (post_id,)).fetchone()
+        if not post:
+            return back(request)
+        product = conn.execute("SELECT * FROM products WHERE item_id = ?", (post["item_id"],)).fetchone()
+        page = {"name": post["page_name"], "niche": post["niche"], "tone": post["tone"]}
+        s = db.get_settings(conn)
+        wish = "; ".join(x for x in (ai_writer.REWRITE_PRESETS.get(preset, ""), instruction.strip()) if x)
+        caption, error = ai_writer.rewrite_caption(page, dict(product) if product else {"name": ""}, post["caption"],
+                                                   wish or ai_writer.REWRITE_PRESETS["new"], s["disclosure"],
+                                                   pipeline.usage_recorder(conn))
+        if error:
+            return RedirectResponse(_with_msg(request.headers.get("referer") or "/review", error) + "&err=1", 303)
+        flags = ai_writer.check_content(caption, s, [])
+        conn.execute("UPDATE posts SET caption=?, flags=?, updated_at=? WHERE id=?",
                      (caption, json.dumps(flags, ensure_ascii=False), db.now_iso(), post_id))
-    return back(request)
+    return RedirectResponse(_with_msg(request.headers.get("referer") or "/review", "AI đã viết lại bài")
+                            + f"#post-{post_id}", 303)
 
 
 @app.post("/posts/{post_id}/{action}")

@@ -41,7 +41,10 @@ AI viết bài, app tự đăng **video** (nếu sản phẩm có video) hoặc 
      Bấm tạo trong Studio, hoặc tick *Tạo video AI* khi dán link. Chưa có giọng đọc (làm sau).
 5. **AI viết bài** cho từng page, dựa trên tên, giá, mô tả bạn cung cấp, theo giọng văn của page.
    Nội dung được kiểm duyệt tự động (từ cấm, câu gây hiểu lầm, trùng lặp giữa các page).
-6. **Bạn duyệt** ở trang *Duyệt bài* (1 nút duyệt tất cả bài sạch), app **tự đăng** đúng giờ,
+6. **Bạn duyệt và sửa bài ngay trên app** (mục *Duyệt bài*, phần **✏️ Sửa bài** ở mỗi bài): sửa nội dung
+   (có đếm chữ), chọn đăng **album / video trình chiếu / video AI / 1 ảnh**, chọn phiên bản và **tick chọn từng ảnh**
+   đưa vào album, đổi **giờ đăng**, **link aff**, bấm **Lưu & duyệt**; hoặc nhờ **AI viết lại** (ngắn hơn, vui hơn,
+   nhấn giá, câu mở đầu cuốn hút, bài mới) kèm yêu cầu riêng. Lưu xong hệ thống tự kiểm duyệt lại. Bạn duyệt ở trang *Duyệt bài* (1 nút duyệt tất cả bài sạch), app **tự đăng** đúng giờ,
    link aff đặt trong bài hoặc ở bình luận đầu tiên.
 7. **Theo dõi** ở *Tổng quan*: tương tác, hoa hồng theo page / ngành / sản phẩm; cảnh báo page bị hạn chế,
    mất quyền, ngành chưa có sản phẩm, bài lỗi. Có **nút dừng khẩn cấp** toàn bộ.

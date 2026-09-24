@@ -177,7 +177,7 @@ def pick_media(conn, item_id: str, page_id: str, kit_media: str = "alternate", s
     if kits:
         kit = kits[zlib.crc32(page_id.encode()) % len(kits)]
         if kit["ai_video_status"] == "ready" and kit_media != "album":
-            return "kit_video", None, kit["id"]                   # có video AI (Veo): ưu tiên video
+            return "ai_video", None, kit["id"]                    # có video AI (Veo): ưu tiên video
         if kit_media == "video" or (kit_media == "alternate" and (seq + zlib.crc32(page_id.encode())) % 2):
             return ("kit_video", None, kit["id"]) if kit["video_path"] else ("album", None, kit["id"])
         return "album", None, kit["id"]
@@ -219,13 +219,14 @@ def publish_due(conn) -> tuple[int, int]:
         if r["media_type"] == "video" and r["video_id"]:
             row = conn.execute("SELECT * FROM videos WHERE id = ?", (r["video_id"],)).fetchone()
             video = dict(row) if row else None
-        elif r["media_type"] in ("album", "kit_video") and r["kit_id"]:
+        elif r["media_type"] in ("album", "kit_video", "ai_video") and r["kit_id"]:
             kit = conn.execute("SELECT * FROM media_kits WHERE id = ? AND status = 'ready'", (r["kit_id"],)).fetchone()
-            if kit and r["media_type"] == "kit_video":
-                ai_ready = kit["ai_video_status"] == "ready" and kit["ai_video_path"]
-                video = {"file_path": kit["ai_video_path"] if ai_ready else kit["video_path"]}
+            if kit and r["media_type"] == "ai_video" and kit["ai_video_status"] == "ready":
+                video = {"file_path": kit["ai_video_path"]}
+            elif kit and r["media_type"] in ("kit_video", "ai_video"):
+                video = {"file_path": kit["video_path"]}
             elif kit:
-                images = json.loads(kit["images"])
+                images = json.loads(r["custom_images"]) if r["custom_images"] else json.loads(kit["images"])
         try:
             res = facebook.publish(page, r["caption"], r["aff_link"], r["image_url"], video, images)
         except Exception as e:  # noqa: BLE001
