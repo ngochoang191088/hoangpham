@@ -57,7 +57,17 @@ SECRET_KEY = os.getenv("SECRET_KEY", "doi-chuoi-bi-mat-nay")
 # Chỉ các tài khoản Facebook này được đăng nhập (ID, cách nhau dấu phẩy).
 # Để trống: người đăng nhập đầu tiên thành chủ app, người khác bị chặn.
 ALLOWED_FB_USERS = [x.strip() for x in os.getenv("ALLOWED_FB_USERS", "").split(",") if x.strip()]
-TZ = ZoneInfo(os.getenv("TIMEZONE", "Asia/Ho_Chi_Minh"))
+def _timezone():
+    """Giờ Việt Nam. Windows không có sẵn dữ liệu múi giờ (cần gói tzdata): khi thiếu thì dùng UTC+7."""
+    try:
+        return ZoneInfo(os.getenv("TIMEZONE", "Asia/Ho_Chi_Minh"))
+    except Exception:  # noqa: BLE001 - ZoneInfoNotFoundError / thiếu tzdata
+        from datetime import timedelta, timezone
+
+        return timezone(timedelta(hours=7), "UTC+07")
+
+
+TZ = _timezone()
 
 FB_LOGIN_ENABLED = bool(FB_APP_ID and FB_APP_SECRET)
 FB_ENABLED = FB_LOGIN_ENABLED or bool(FB_SYSTEM_USER_TOKEN)

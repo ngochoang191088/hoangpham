@@ -29,12 +29,13 @@ call .venv\Scripts\activate.bat
 
 echo [2/4] Cai thu vien (lan dau mat 3-10 phut tuy mang, co thanh tien do ben duoi)...
 python -m pip install --upgrade pip --disable-pip-version-check
-pip install -r requirements.txt --disable-pip-version-check || (echo [LOI] Cai thu vien loi, chup man hinh gui lai & pause & exit /b)
+pip install -r requirements.txt --disable-pip-version-check || goto :loi
 
 if not exist .env copy .env.example .env >nul
-if not exist data\app.db (
+if not exist data\demo_ok.txt (
   echo [3/4] Tao du lieu mau 82 page, anh va video mau: mat 1-3 phut...
-  python -m app.demo || (echo [LOI] Tao du lieu mau loi, chup man hinh gui lai & pause & exit /b)
+  python -m app.demo || goto :loi
+  echo ok> data\demo_ok.txt
 )
 
 echo.
@@ -44,4 +45,16 @@ echo       Dong cua so nay = tat app.
 echo.
 start "" cmd /c "timeout /t 5 >nul & start http://localhost:8000"
 python -m uvicorn app.main:app --port 8000
+echo.
+echo App da dung.
+goto :ketthuc
+
+:loi
+echo.
+echo ============================================================
+echo [LOI] Co loi o tren. CHUP MAN HINH cua so nay gui lai
+echo       TRUOC KHI bam phim (bam phim la cua so se dong).
+echo ============================================================
+
+:ketthuc
 pause

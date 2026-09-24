@@ -67,7 +67,7 @@ def make_video(slides: list[str], out_path: str, variant: int = 0, seconds: floa
             "-t", f"{total:.2f}", "-r", str(FPS), "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
             "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", out_path]
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
     if result.returncode != 0:
         raise RuntimeError(f"Dựng video lỗi: {result.stderr.strip()[-400:]}")
     return out_path
@@ -75,7 +75,7 @@ def make_video(slides: list[str], out_path: str, variant: int = 0, seconds: floa
 
 def probe_duration(path: str) -> float:
     """Độ dài video (giây), dùng để kiểm tra."""
-    result = subprocess.run([ffmpeg_exe(), "-i", path], capture_output=True, text=True)
+    result = subprocess.run([ffmpeg_exe(), "-i", path], capture_output=True, text=True, encoding="utf-8", errors="replace")
     for line in result.stderr.splitlines():
         if "Duration:" in line:
             h, m, s = line.split("Duration:")[1].split(",")[0].strip().split(":")
@@ -84,7 +84,7 @@ def probe_duration(path: str) -> float:
 
 
 def has_audio(path: str) -> bool:
-    result = subprocess.run([ffmpeg_exe(), "-i", path], capture_output=True, text=True)
+    result = subprocess.run([ffmpeg_exe(), "-i", path], capture_output=True, text=True, encoding="utf-8", errors="replace")
     return "Audio:" in result.stderr
 
 
@@ -95,7 +95,7 @@ def animate_still(image: str, out_path: str, seconds: float = 8.0) -> str:
            "-vf", f"scale=1188:2112,zoompan=z='min(zoom+0.0009,1.1)':d={frames}:x='iw/2-(iw/zoom/2)'"
                   f":y='ih/2-(ih/zoom/2)+on*0.15':s=720x1280:fps={FPS},format=yuv420p",
            "-t", f"{seconds}", "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", out_path]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
     if result.returncode != 0:
         raise RuntimeError(f"Dựng video lỗi: {result.stderr.strip()[-300:]}")
     return out_path
@@ -127,7 +127,7 @@ def compose_ad(clip: str, overlay_png: str, end_card: str, out_path: str, keep_a
     cmd += ["-filter_complex", ";".join(graph), "-map", "[v]", "-map", "[a]", "-t", f"{total:.2f}",
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "22", "-pix_fmt", "yuv420p",
             "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", out_path]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
     if result.returncode != 0:
         raise RuntimeError(f"Ghép video lỗi: {result.stderr.strip()[-400:]}")
     return out_path
