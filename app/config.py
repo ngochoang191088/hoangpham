@@ -25,7 +25,8 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
 FB_APP_ID = os.getenv("FB_APP_ID", "")
 FB_APP_SECRET = os.getenv("FB_APP_SECRET", "")
 # Địa chỉ public của app, dùng làm redirect sau khi đăng nhập Facebook
-BASE_URL = os.getenv("BASE_URL", "http://localhost:8000").rstrip("/")
+# (Render.com tự cung cấp RENDER_EXTERNAL_URL = link https của app)
+BASE_URL = (os.getenv("BASE_URL") or os.getenv("RENDER_EXTERNAL_URL") or "http://localhost:8000").rstrip("/")
 # (Tuỳ chọn) token System User nếu page nằm trong Meta Business Portfolio
 FB_SYSTEM_USER_TOKEN = os.getenv("FB_SYSTEM_USER_TOKEN", "")
 FB_GRAPH_VERSION = os.getenv("FB_GRAPH_VERSION", "v23.0")

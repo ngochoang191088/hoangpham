@@ -61,6 +61,18 @@ AI viết bài, app tự đăng **video** (nếu sản phẩm có video) hoặc 
 | **Duyệt bài** | **Chi tiết một page** |
 | ![](docs/review.png) | ![](docs/page.png) |
 
+## Chạy thử online (không cần cài gì)
+
+Dùng gói miễn phí của [Render.com](https://render.com), app chạy trên mạng với link `https://...onrender.com`:
+
+1. Vào https://dashboard.render.com → đăng nhập bằng **GitHub**, cho phép Render đọc repo này.
+2. Bấm **New +** → **Blueprint** → chọn repo `hoangpham`, chọn nhánh (branch) chứa code → Render tự đọc file `render.yaml`.
+3. Điền **ADMIN_PASSWORD** (mật khẩu vào app). `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` để trống = chạy giả lập, không tốn tiền.
+4. Bấm **Apply**, chờ 5-10 phút (cài thư viện + tạo dữ liệu mẫu 82 page) → mở link Render đưa ra, nhập mật khẩu.
+
+Lưu ý gói miễn phí: không ai truy cập 15 phút thì app ngủ, lần mở sau chờ khoảng 1 phút;
+mỗi lần khởi động lại, dữ liệu quay về bộ dữ liệu mẫu (chỉ để xem thử, chưa dùng chạy thật).
+
 ## Chạy thử ngay (DEMO)
 
 **Cách nhanh nhất:** cài [Python 3.11+](https://www.python.org/downloads/) (Windows: tick *Add python.exe to PATH*),

@@ -1,0 +1,21 @@
+# Đưa app lên Render.com (gói miễn phí) để dùng thử qua trình duyệt, không cần cài gì trên máy.
+# Hướng dẫn: xem mục "Chạy thử online" trong README.md
+services:
+  - type: web
+    name: aff-pages
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt && python -m app.demo
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /login
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: ADMIN_PASSWORD
+        sync: false            # Render hỏi bạn đặt mật khẩu khi tạo
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ANTHROPIC_API_KEY
+        sync: false            # để trống nếu chưa có
+      - key: GEMINI_API_KEY
+        sync: false            # để trống nếu chưa có
