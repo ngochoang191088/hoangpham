@@ -28,16 +28,22 @@ AI viết bài, app tự đăng **video** (nếu sản phẩm có video) hoặc 
 4. **Studio ảnh & video** (tự động cho mỗi sản phẩm):
    - Lấy **ảnh gốc** từ link Shopee (hoặc link ảnh trong file Excel / ảnh bạn tải lên), tải về máy chủ.
    - **AI (Claude) xem ảnh** + thông tin sản phẩm: chọn ảnh đẹp nhất làm bìa, bỏ ảnh xấu / bảng size,
-     soạn tiêu đề, 3-4 điểm nổi bật, lời kêu gọi, chữ cho video (chỉ dựa trên thông tin có thật).
+     soạn tiêu đề, 3-4 điểm nổi bật, lời kêu gọi, chữ cho video (chỉ dựa trên thông tin có thật),
+     và nghĩ **3 ý tưởng bối cảnh riêng cho sản phẩm** (ai dùng, dùng ở đâu, quay thế nào). Sửa được ý tưởng trong Studio.
+   - **🖼 Ảnh AI (Nano Banana)**: AI đặt **đúng sản phẩm ở ảnh gốc** vào từng bối cảnh (không đổi sản phẩm, không chữ).
+     Claude Haiku **tự so ảnh AI với ảnh gốc và chấm điểm**: đạt thì dùng luôn; kém thì tạo lại 1 lần, vẫn kém thì
+     **không dùng** và vào trang *Studio → Ảnh AI cần xem*. Bạn chỉ xem ảnh bị gắn cờ, không phải xem hết.
+     Ảnh AI đạt lên đầu album (ảnh bìa đổi giữa các phiên bản), ảnh gốc theo sau.
    - App **chỉnh ảnh** (cân bằng sáng, tương phản, độ nét, phóng to ảnh nhỏ) và **thiết kế 3-5 ảnh 4:5**
      (ảnh bìa có giá, ảnh điểm nổi bật, ảnh kêu gọi mua) + **1 video ngắn 9:16** (10-15 giây, chuyển cảnh,
      nhạc nền tuỳ chọn trong `data/music/`).
    - Mỗi sản phẩm có **nhiều phiên bản** khác màu / bố cục / ảnh bìa; mỗi page dùng 1 phiên bản riêng để
      các page không đăng ảnh giống hệt nhau. Bạn sửa được chữ trên ảnh rồi bấm *Lưu & dựng lại*.
    - Bài đăng dùng **album 3-5 ảnh** hoặc **video ngắn** (xen kẽ, đổi trong *Cài đặt*).
-   - **🎬 Video AI bằng Google Veo 3.1**: app đặt ảnh sản phẩm (không chữ) lên khung 9:16 làm khung đầu,
-     Veo tạo chuyển động ~8 giây giữ nguyên sản phẩm (kiểu: quay studio / cận cảnh rồi lùi ra / bối cảnh sử dụng),
-     rồi app chèn lại tiêu đề + giá và nối cảnh cuối kêu gọi mua (~10 giây). Có video AI thì bài video ưu tiên dùng.
+   - **🎬 Video AI bằng Google Veo 3.1**: kiểu mặc định *theo ý tưởng AI*: mỗi phiên bản lấy 1 ý tưởng bối cảnh của
+     sản phẩm, khung đầu là ảnh AI 9:16 của ý tưởng đó, Veo tạo chuyển động ~8 giây theo kịch bản của ý tưởng
+     → mỗi sản phẩm / phiên bản một video khác nhau. Vẫn chọn được kiểu cố định (quay studio / cận cảnh rồi lùi ra / bối cảnh sử dụng).
+     App chèn lại tiêu đề + giá và nối cảnh cuối kêu gọi mua (~10 giây). Có video AI thì bài video ưu tiên dùng.
      Bấm tạo trong Studio, hoặc tick *Tạo video AI* khi dán link. Chưa có giọng đọc (làm sau).
 5. **AI viết bài** cho từng page, dựa trên tên, giá, mô tả bạn cung cấp, theo giọng văn của page.
    Nội dung được kiểm duyệt tự động (từ cấm, câu gây hiểu lầm, trùng lặp giữa các page).
@@ -143,11 +149,23 @@ Giá Veo thay đổi theo thời điểm và nguồn công bố khác nhau: **ki
 Video AI tốn hơn nhiều so với phần còn lại, nên app mặc định chỉ làm video AI cho phiên bản 1 của mỗi sản phẩm.
 API Gemini không cho tắt tiếng khi tạo: app mặc định tắt tiếng Veo (dùng nhạc nền nếu có), đổi trong *Cài đặt*.
 
-### 4. (Tuỳ chọn) Shopee Affiliate Open API
+### 4. Ảnh AI (Nano Banana, cùng `GEMINI_API_KEY`)
+Bật / tắt và số ảnh mỗi sản phẩm (1-3) trong *Cài đặt*. Chưa có key: app giả lập (ghép ảnh gốc lên nền), không tốn tiền.
+
+| `IMAGE_MODEL` | Giá tham khảo | ≈ / ảnh |
+|---|---|---|
+| `gemini-3.1-flash-image` (mặc định, Nano Banana 2) | ~0,045 USD | ~1.200đ |
+| `gemini-3-pro-image` (Nano Banana Pro, giữ chi tiết tốt nhất) | ~0,134 USD | ~3.500đ |
+
+Mỗi sản phẩm: 3 ảnh ≈ 3.500đ (+ ảnh tạo lại khi bị chấm thấp, + ~100đ Claude Haiku chấm điểm); ảnh chỉ tạo 1 lần,
+dựng lại / thêm phiên bản không tốn thêm. Video AI kiểu "theo ý tưởng" tạo thêm 1 ảnh 9:16 làm khung đầu.
+Chi phí thật tháng này hiện trong *Cài đặt → Kết nối*. Kiểm tra bảng giá Gemini API trước khi chạy nhiều.
+
+### 5. (Tuỳ chọn) Shopee Affiliate Open API
 Điền `SHOPEE_APP_ID`, `SHOPEE_APP_SECRET` nếu muốn app tự lấy tên / giá / ảnh / % hoa hồng từ link sản phẩm
 và đồng bộ hoa hồng thật. Không bắt buộc: bạn tự nhập link aff là đủ.
 
-### 5. Chạy tự động (cron trên VPS)
+### 6. Chạy tự động (cron trên VPS)
 
 ```cron
 # Xử lý nốt link Shopee đang chờ (nếu app khởi động lại giữa chừng)
@@ -197,7 +215,8 @@ app/
     catalog.py         kho sản phẩm + video theo ngành hàng
     ai_writer.py       viết caption (Claude, Batch API) + kiểm duyệt
     studio.py          lấy ảnh gốc → AI soạn chữ → dựng ảnh + video, nhiều phiên bản
-    creative.py        Claude xem ảnh, soạn chữ trên ảnh / video (JSON)
+    creative.py        Claude xem ảnh, soạn chữ trên ảnh / video + 3 ý tưởng bối cảnh riêng (JSON)
+    imagegen.py        ảnh AI Nano Banana (sản phẩm thật trong bối cảnh mới) + Claude tự chấm điểm
     designer.py        chỉnh ảnh + thiết kế ảnh 4:5 và khung 9:16 (Pillow, font Be Vietnam Pro)
     video_maker.py     dựng video ngắn, ghép video AI + chữ + cảnh cuối (ffmpeg)
     veo.py             video AI bằng Google Veo 3.1 (Gemini API, image-to-video)

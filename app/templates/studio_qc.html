@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Ảnh AI cần xem{% endblock %}
+{% block content %}
+<a class="small" href="/studio">← Studio</a>
+<h1 style="margin:4px 0 8px">Ảnh AI cần xem</h1>
+<p class="muted">Mỗi ảnh AI được Claude so với ảnh gốc và chấm điểm. Ảnh đạt (từ {{ 7 }}/10, đúng sản phẩm) được dùng luôn.
+  Ảnh chấm thấp đã được tạo lại 1 lần, vẫn thấp thì nằm ở đây, <b>chưa dùng</b> cho tới khi bạn duyệt.
+  Bạn chỉ cần xem các ảnh này, không phải xem hết.</p>
+<div class="row" style="gap:6px; margin-bottom:12px">
+  {% for k, v in {'review': 'Cần xem', 'ok': 'Đang dùng', 'rejected': 'Đã bỏ'}.items() %}
+    <a class="pill {{ 'published' if show == k else 'niche' }}" href="?show={{ k }}">{{ v }} · {{ stats.get(k, 0) }}</a>
+  {% endfor %}
+</div>
+<div class="grid" style="grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap:12px">
+{% for r in rows %}
+  <div class="card">
+    <div class="row small" style="justify-content: space-between">
+      <a href="/studio/{{ r.item_id | urlencode }}"><b>{{ r.product_name or r.item_id }}</b></a>
+      <span class="pill {{ 'niche' if r.score is none else ('published' if r.score >= 7 else ('pending' if r.score >= 5 else 'failed')) }}">
+        {{ ('%d/10' % r.score) if r.score is not none else 'chưa chấm' }}</span>
+    </div>
+    <div class="row" style="gap:8px; margin-top:8px; flex-wrap:nowrap; align-items:flex-start">
+      <figure style="margin:0; flex:1"><img src="{{ r.ref_path | media }}" alt="" loading="lazy" style="width:100%; aspect-ratio:4/5; object-fit:contain; background:#fff; border-radius:8px; border:1px solid var(--line)">
+        <figcaption class="small muted">Ảnh gốc</figcaption></figure>
+      <figure style="margin:0; flex:1"><a href="{{ r.path | media }}" target="_blank"><img src="{{ r.path | media }}" alt="" loading="lazy" style="width:100%; aspect-ratio:{{ '4/5' if r.aspect == '4:5' else '9/16' }}; object-fit:cover; border-radius:8px"></a>
+        <figcaption class="small muted">Ảnh AI · ý tưởng {{ r.scene + 1 }} · {{ r.aspect }}{{ ' · giả lập' if r.simulated }}</figcaption></figure>
+    </div>
+    {% if r.note %}<div class="small {{ 'flag' if r.status == 'review' }}" style="margin-top:6px">{{ r.note }}</div>{% endif %}
+    <div class="row" style="margin-top:8px">
+      {% if r.status != 'ok' %}<form class="inline" method="post" action="/studio/ai-images/{{ r.id }}/approve"><button class="ok">✓ Dùng ảnh này</button></form>{% endif %}
+      <form class="inline" method="post" action="/studio/ai-images/{{ r.id }}/redo"><button>↻ Tạo lại</button></form>
+      {% if r.status != 'rejected' %}<form class="inline" method="post" action="/studio/ai-images/{{ r.id }}/reject"><button>✕ Bỏ</button></form>{% endif %}
+    </div>
+  </div>
+{% else %}
+  <p class="muted">{{ 'Không có ảnh nào cần xem 🎉' if show == 'review' else 'Chưa có ảnh.' }}</p>
+{% endfor %}
+</div>
+{% endblock %}

@@ -134,6 +134,32 @@ CREATE TABLE IF NOT EXISTS video_usage (   -- số giây video AI (Veo) đã t�
     simulated INTEGER NOT NULL DEFAULT 0
 );
 
+-- Ảnh AI (Nano Banana): sản phẩm thật đặt vào bối cảnh mới, theo từng ý tưởng (scene) của sản phẩm
+CREATE TABLE IF NOT EXISTS ai_images (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id TEXT NOT NULL REFERENCES products(item_id) ON DELETE CASCADE,
+    scene INTEGER NOT NULL DEFAULT 0,       -- thứ tự ý tưởng trong brief.scenes
+    aspect TEXT NOT NULL DEFAULT '4:5',     -- 4:5 (bộ ảnh) | 9:16 (khung đầu video Veo)
+    prompt TEXT NOT NULL DEFAULT '',        -- đổi ý tưởng -> prompt khác -> tự tạo lại
+    path TEXT NOT NULL DEFAULT '',
+    ref_path TEXT NOT NULL DEFAULT '',      -- ảnh gốc dùng làm mẫu (để so khi duyệt)
+    model TEXT NOT NULL DEFAULT '',
+    simulated INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'ok',      -- ok (được dùng) | review (AI chấm thấp, chờ bạn xem) | rejected (bạn bỏ)
+    score INTEGER,                          -- điểm AI tự chấm 0-10 (NULL = chưa chấm)
+    note TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    UNIQUE(item_id, scene, aspect)
+);
+
+CREATE TABLE IF NOT EXISTS image_usage (   -- số ảnh AI đã tạo, để tính chi phí
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT NOT NULL,
+    model TEXT NOT NULL,
+    images INTEGER NOT NULL DEFAULT 1,
+    simulated INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS conversions (
     conversion_id TEXT PRIMARY KEY,
     page_id TEXT,
@@ -198,10 +224,13 @@ DEFAULT_SETTINGS = {
     "media_variants": 2,
     "ai_tier": "save",
     # Video AI bằng Veo 3.1 (Gemini API)
-    "veo_style": "studio",      # kiểu chuyển động, xem services/veo.py
+    "veo_style": "scene",       # scene = theo ý tưởng AI nghĩ riêng cho sản phẩm; hoặc kiểu cố định, xem services/veo.py
     "veo_audio": "mute",        # mute (tắt tiếng Veo, dùng nhạc nền nếu có) | keep (giữ âm thanh Veo tạo)
     "veo_auto": True,           # dán link Shopee -> tự tạo luôn video Veo          # save (Haiku 4.5, rẻ nhất) | balanced | quality — xem services/ai_models.py
     "kit_media": "alternate",   # alternate (xen kẽ album ảnh / video) | album | video
+    # Ảnh AI (Nano Banana): đặt sản phẩm thật vào bối cảnh mới, dùng cho bộ ảnh + khung đầu video Veo
+    "ai_images": True,
+    "ai_image_count": 3,        # số ảnh bối cảnh mỗi sản phẩm (1-3)
 }
 
 

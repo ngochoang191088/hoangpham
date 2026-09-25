@@ -62,9 +62,43 @@
       <label>Nhãn (để trống nếu không có)<input name="badge" value="{{ brief.badge }}" maxlength="16"></label>
       <label>Chữ trong video (mỗi dòng 1 cảnh)<textarea name="video_lines" style="min-height:90px">{{ brief.video_lines | join('\n') }}</textarea></label>
       <label>Thứ tự ảnh gốc (số #, cách nhau dấu phẩy)<input name="image_order" value="{{ brief.image_order | join(', ') }}"></label>
+      <label>Ý tưởng bối cảnh cho ảnh AI & video (mỗi dòng: tên | bối cảnh | chuyển động; bối cảnh, chuyển động viết tiếng Anh cho AI hiểu tốt nhất; đổi ý tưởng nào thì ảnh đó được tạo lại)
+        <textarea name="scenes" style="min-height:110px; font-size:13px">{% for sc in brief.scenes or [] %}{{ sc.label }} | {{ sc.setting }} | {{ sc.motion }}
+{% endfor %}</textarea></label>
       <button class="primary" {{ 'disabled' if processing }}>Lưu & dựng lại</button>
     </form>
     {% else %}<p class="muted">Chưa có. Bấm <b>✨ AI tạo mới bộ ảnh + video</b>: AI xem ảnh gốc + thông tin sản phẩm để soạn chữ.</p>{% endif %}
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:16px" id="anh-ai">
+  <div class="row" style="justify-content: space-between">
+    <h2 style="margin:0">Ảnh AI theo ý tưởng riêng của sản phẩm</h2>
+    <span class="small muted">{% if not ai_count %}Đang tắt (bật trong <a href="/settings">Cài đặt</a>)
+      {% elif image_enabled %}{{ config.IMAGE_MODEL }} · ≈ {{ image_cost_vnd | round | int | vnd }}/ảnh
+      {% else %}<b>Chưa có GEMINI_API_KEY: đang giả lập</b> (không tốn tiền){% endif %}</span>
+  </div>
+  <p class="muted small">AI đặt đúng sản phẩm ở ảnh gốc vào từng bối cảnh (không đổi sản phẩm, không chữ), rồi tự so với ảnh gốc để chấm điểm.
+    Ảnh đạt được dùng làm ảnh bìa / ảnh trong album và khung đầu video AI; ảnh chấm thấp chờ bạn xem (<a href="/studio/qc">Ảnh AI cần xem</a>).</p>
+  {% set scenes = (brief.scenes if brief else []) or [] %}
+  <div class="grid" style="grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap:12px">
+    {% for r in ai_images %}
+    <div>
+      <a href="{{ r.path | media }}" target="_blank"><img src="{{ r.path | media }}" alt="" loading="lazy"
+         style="width:100%; aspect-ratio:{{ '4/5' if r.aspect == '4:5' else '9/16' }}; object-fit:cover; border-radius:8px; border:1px solid var(--line); {{ 'opacity:.45' if r.status == 'rejected' }}"></a>
+      <div class="small"><b>{{ scenes[r.scene].label if r.scene < scenes | length else 'Ý tưởng ' ~ (r.scene + 1) }}</b> · {{ r.aspect }}</div>
+      <div class="row small" style="gap:4px">
+        <span class="pill {{ {'ok':'published','review':'pending','rejected':'failed'}[r.status] }}">{{ {'ok':'Đang dùng','review':'Cần xem','rejected':'Đã bỏ'}[r.status] }}</span>
+        {% if r.score is not none %}<span class="muted">{{ r.score }}/10</span>{% endif %}{% if r.simulated %}<span class="muted">giả lập</span>{% endif %}
+      </div>
+      {% if r.note %}<div class="small muted">{{ r.note }}</div>{% endif %}
+      <div class="row" style="gap:4px; margin-top:4px">
+        {% if r.status != 'ok' %}<form class="inline" method="post" action="/studio/ai-images/{{ r.id }}/approve"><button class="small" style="padding:0 6px" title="Dùng ảnh này">✓</button></form>{% endif %}
+        <form class="inline" method="post" action="/studio/ai-images/{{ r.id }}/redo"><button class="small" style="padding:0 6px" title="Tạo lại">↻</button></form>
+        {% if r.status != 'rejected' %}<form class="inline" method="post" action="/studio/ai-images/{{ r.id }}/reject"><button class="small" style="padding:0 6px" title="Không dùng">✕</button></form>{% endif %}
+      </div>
+    </div>
+    {% else %}<p class="muted small">Chưa có ảnh AI. Bấm <b>✨ AI tạo mới bộ ảnh + video</b>.</p>{% endfor %}
   </div>
 </div>
 
@@ -98,7 +132,8 @@
         {% if kit.ai_video_status == 'ready' %}<span class="pill published">Đã xong · {{ kit.ai_video_model }}</span>
         {% elif kit.ai_video_status == 'processing' %}<span class="pill pending">Đang tạo… (1-3 phút)</span>
         {% elif kit.ai_video_status == 'error' %}<span class="pill failed">Lỗi</span>{% endif %}
-        <div class="small muted">Veo lấy ảnh sản phẩm (không chữ) làm khung đầu và tạo chuyển động ~{{ config.VEO_SECONDS }} giây; app chèn lại tiêu đề, giá và cảnh cuối kêu gọi mua.
+        <div class="small muted">Kiểu “theo ý tưởng AI”: mỗi phiên bản dùng 1 ý tưởng bối cảnh của sản phẩm, khung đầu là ảnh AI 9:16 của ý tưởng đó,
+          Veo tạo chuyển động ~{{ config.VEO_SECONDS }} giây theo kịch bản của ý tưởng; app chèn lại tiêu đề, giá và cảnh cuối kêu gọi mua.
           Chưa có giọng đọc. {% if veo_enabled %}Chi phí ≈ {{ (veo_cost_vnd / 1000) | round | int }}.000đ / video.{% else %}<b>Chưa có GEMINI_API_KEY: đang giả lập</b> (không tốn tiền).{% endif %}</div>
         {% if kit.ai_video_error %}<div class="flag">{{ kit.ai_video_error }}</div>{% endif %}
       </div>

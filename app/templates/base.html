@@ -20,7 +20,7 @@
     <a class="item {{ 'on' if path.startswith('/review') }}" href="/review">Duyệt bài {% if pending_count %}<span class="badge">{{ pending_count }}</span>{% endif %}</a>
     <a class="item {{ 'on' if path.startswith('/posts') }}" href="/posts">Bài đăng</a>
     <a class="item {{ 'on' if path.startswith('/products') }}" href="/products">Sản phẩm</a>
-    <a class="item {{ 'on' if path.startswith('/studio') }}" href="/studio">Studio</a>
+    <a class="item {{ 'on' if path.startswith('/studio') }}" href="{{ '/studio/qc' if ai_review_count else '/studio' }}">Studio {% if ai_review_count %}<span class="badge" title="Ảnh AI cần xem">{{ ai_review_count }}</span>{% endif %}</a>
     <a class="item {{ 'on' if path.startswith('/settings') }}" href="/settings">Cài đặt</a>
     <span class="spacer"></span>
     {% if user %}<span class="small muted" style="margin-right:8px" title="{{ user.name }}">👤</span>

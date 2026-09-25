@@ -9,9 +9,13 @@
     <button class="primary">🎨 Tạo bộ media cho tất cả sản phẩm chưa có{% if niche %} trong “{{ niche }}”{% endif %}</button>
   </form>
 </div>
-<p class="muted">Mỗi sản phẩm (theo <b>link sản phẩm</b>): app lấy ảnh gốc từ Shopee, AI xem ảnh và soạn chữ, rồi dựng
-  <b>3-5 ảnh 4:5 đã chỉnh</b> + <b>1 video ngắn 9:16</b>. Mỗi sản phẩm có nhiều phiên bản khác màu / bố cục để các page không đăng ảnh giống hệt nhau.
+<p class="muted">Mỗi sản phẩm (theo <b>link sản phẩm</b>): app lấy ảnh gốc từ Shopee, AI xem ảnh, soạn chữ và nghĩ <b>3 ý tưởng bối cảnh riêng</b>;
+  AI tạo ảnh đặt đúng sản phẩm vào từng bối cảnh (tự chấm điểm, ảnh kém không dùng), rồi dựng
+  <b>3-5 ảnh 4:5</b> + <b>1 video ngắn 9:16</b>. Mỗi sản phẩm có nhiều phiên bản khác màu / bố cục để các page không đăng ảnh giống hệt nhau.
   Link aff chỉ được gắn vào bài viết hoặc bình luận.</p>
+
+{% if ai_review_count %}<div class="alert warn">🔍 <b>{{ ai_review_count }} ảnh AI cần xem</b>: AI tự chấm thấp nên chưa dùng. Ảnh đạt không cần xem.
+  <a href="/studio/qc">Xem & duyệt nhanh →</a></div>{% endif %}
 
 {% include "_quick_add.html" %}
 

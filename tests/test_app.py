@@ -683,3 +683,177 @@ def test_post_editor_in_review(client, monkeypatch):
     client.post(f"/posts/{post_id}/edit", data={"caption": "hack"})
     with db.get_conn() as conn:
         assert conn.execute("SELECT caption FROM posts WHERE id = ?", (post_id,)).fetchone()[0] == new_caption
+
+
+def test_ai_images_built_with_scenes_and_used_in_kit(client):
+    """Bật ảnh AI (mặc định): mỗi sản phẩm có 3 ý tưởng riêng -> 3 ảnh AI 4:5 (giả lập khi chưa có key), được dùng."""
+    with db.get_conn() as conn:
+        item_id = conn.execute("SELECT item_id FROM products WHERE niche = 'Âm thanh' "
+                               "AND item_id NOT IN (SELECT item_id FROM media_kits) LIMIT 1").fetchone()[0]
+    client.post(f"/studio/{item_id}/build", data={"new_brief": "1"})
+    from app.services import studio
+    with db.get_conn() as conn:
+        rows = conn.execute("SELECT * FROM ai_images WHERE item_id = ? ORDER BY scene", (item_id,)).fetchall()
+        assert [(r["scene"], r["aspect"], r["status"], r["simulated"]) for r in rows] == \
+            [(0, "4:5", "ok", 1), (1, "4:5", "ok", 1), (2, "4:5", "ok", 1)]
+        brief = studio.get_brief(conn, item_id)
+        assert len(brief["scenes"]) == 3 and all(s["setting"] and s["motion"] for s in brief["scenes"])
+        assert "EXACTLY as in the reference" in rows[0]["prompt"] and brief["scenes"][0]["setting"] in rows[0]["prompt"]
+        n_usage = conn.execute("SELECT COUNT(*) FROM image_usage").fetchone()[0]
+        # Dựng lại (giữ chữ): ý tưởng không đổi -> không tạo lại ảnh AI (không tốn thêm tiền)
+        client.post(f"/studio/{item_id}/build")
+        assert conn.execute("SELECT COUNT(*) FROM image_usage").fetchone()[0] == n_usage
+        # Sửa ý tưởng 2 -> chỉ ảnh đó được tạo lại
+        lines = [f"{s['label']} | {s['setting']} | {s['motion']}" for s in brief["scenes"]]
+        lines[1] = "Trên bàn làm việc | on a wooden office desk next to a laptop, morning light | slow push-in"
+        client.post(f"/studio/{item_id}/brief", data={"headline": "Tai nghe", "points": "A\nB\nC",
+                                                      "video_lines": "A\nB\nC", "scenes": "\n".join(lines)})
+        assert conn.execute("SELECT COUNT(*) FROM image_usage").fetchone()[0] == n_usage + 1
+        assert studio.get_brief(conn, item_id)["scenes"][1]["label"] == "Trên bàn làm việc"
+        # Sửa chữ bằng form cũ (không có ô ý tưởng): giữ ý tưởng
+        client.post(f"/studio/{item_id}/brief", data={"headline": "Tai nghe 2", "points": "A\nB\nC"})
+        assert studio.get_brief(conn, item_id)["scenes"][1]["label"] == "Trên bàn làm việc"
+    html = client.get(f"/studio/{item_id}").text
+    assert "Ảnh AI theo ý tưởng riêng" in html and "Trên bàn làm việc" in html
+
+
+def test_ai_image_low_score_retries_then_waits_for_review(client, monkeypatch):
+    """AI chấm thấp -> tạo lại 1 lần -> vẫn thấp: không dùng, vào hàng chờ; bạn duyệt -> được dùng."""
+    from app.services import imagegen, studio
+    with db.get_conn() as conn:
+        item_id = conn.execute("SELECT item_id FROM products WHERE niche = 'Thú cưng' "
+                               "AND item_id NOT IN (SELECT item_id FROM media_kits) LIMIT 1").fetchone()[0]
+        db.set_setting(conn, "ai_image_count", 1)
+    monkeypatch.setattr(imagegen, "check", lambda *a, **k: {"score": 3, "same_product": False,
+                                                            "note": "Sản phẩm bị đổi màu"})
+    with db.get_conn() as conn:
+        before = conn.execute("SELECT COUNT(*) FROM image_usage").fetchone()[0]
+        studio.build_all_variants(conn, item_id, new_brief=True)
+        row = conn.execute("SELECT * FROM ai_images WHERE item_id = ?", (item_id,)).fetchone()
+        assert row["status"] == "review" and row["score"] == 3 and row["note"] == "Sản phẩm bị đổi màu"
+        assert conn.execute("SELECT COUNT(*) FROM image_usage").fetchone()[0] == before + 2   # tạo lại 1 lần
+        kit = conn.execute("SELECT * FROM media_kits WHERE item_id = ? AND variant = 0", (item_id,)).fetchone()
+        assert kit["status"] == "ready"                                  # vẫn có bộ ảnh (dùng ảnh gốc)
+    html = client.get("/studio/qc").text
+    assert "Sản phẩm bị đổi màu" in html and "Dùng ảnh này" in html
+    assert 'title="Ảnh AI cần xem"' in client.get("/").text
+    monkeypatch.undo()
+    client.post(f"/studio/ai-images/{row['id']}/approve")
+    with db.get_conn() as conn:
+        assert conn.execute("SELECT status FROM ai_images WHERE id = ?", (row["id"],)).fetchone()[0] == "ok"
+        # Tạo lại: xoá ảnh cũ, dựng lại -> ảnh mới (không có key: giả lập, không chấm -> dùng luôn)
+        client.post(f"/studio/ai-images/{row['id']}/redo")
+        new = conn.execute("SELECT * FROM ai_images WHERE item_id = ?", (item_id,)).fetchone()
+        assert new["status"] == "ok" and new["path"] != row["path"]
+        db.set_setting(conn, "ai_image_count", 3)
+    assert "Không có ảnh nào cần xem" in client.get("/studio/qc").text
+
+
+def test_ai_images_can_be_turned_off(client):
+    from app.services import studio
+    with db.get_conn() as conn:
+        item_id = conn.execute("SELECT item_id FROM products WHERE niche = 'Giày dép' "
+                               "AND item_id NOT IN (SELECT item_id FROM media_kits) LIMIT 1").fetchone()[0]
+        db.set_setting(conn, "ai_images", False)
+        studio.build_kit(conn, item_id, 0)
+        assert conn.execute("SELECT COUNT(*) FROM ai_images WHERE item_id = ?", (item_id,)).fetchone()[0] == 0
+        assert conn.execute("SELECT status FROM media_kits WHERE item_id = ?", (item_id,)).fetchone()[0] == "ready"
+        db.set_setting(conn, "ai_images", True)
+
+
+def test_scene_ai_video_uses_ai_frame_and_scene_motion(client, monkeypatch):
+    """Video AI kiểu "theo ý tưởng": khung đầu = ảnh AI 9:16 của ý tưởng, prompt = chuyển động của ý tưởng."""
+    from app.services import studio, veo
+    with db.get_conn() as conn:
+        item_id = conn.execute("SELECT item_id FROM ai_images WHERE aspect = '4:5' LIMIT 1").fetchone()[0]
+        sent = {}
+        real = veo.generate
+
+        def fake(frame, prompt, out, **kw):
+            sent.update(frame=frame, prompt=prompt, **kw)
+            return real(frame, prompt, out)
+
+        monkeypatch.setattr(veo, "generate", fake)
+        studio.build_ai_video(conn, item_id, 1, "scene")
+        kit = conn.execute("SELECT * FROM media_kits WHERE item_id = ? AND variant = 1", (item_id,)).fetchone()
+        assert kit["ai_video_status"] == "ready", kit["ai_video_error"]
+        scene = studio.get_brief(conn, item_id)["scenes"][1]
+        assert scene["motion"] in sent["prompt"] and sent["negative"] == veo.NEGATIVE_SCENE
+        row = conn.execute("SELECT * FROM ai_images WHERE item_id = ? AND aspect = '9:16'", (item_id,)).fetchone()
+        assert row["scene"] == 1 and row["status"] == "ok"
+        from PIL import Image
+        assert Image.open(sent["frame"]).size == (1080, 1920)
+
+
+def test_imagegen_calls_gemini_with_reference_images(monkeypatch, tmp_path):
+    """Nano Banana: gửi ảnh gốc + mô tả bối cảnh, chỉ lấy ảnh, đúng tỉ lệ; lưu JPEG đúng khung."""
+    import io
+    import sys
+    from types import ModuleType, SimpleNamespace as NS
+
+    from PIL import Image
+
+    from app import config
+    from app.services import imagegen
+    monkeypatch.setattr(config, "GEMINI_API_KEY", "k")
+    src = tmp_path / "src.jpg"
+    Image.new("RGB", (800, 800), "red").save(src)
+    buf = io.BytesIO()
+    Image.new("RGB", (896, 1152), "blue").save(buf, "PNG")
+    calls = {}
+
+    class Models:
+        def generate_content(self, model, contents, config):
+            calls.update(model=model, contents=contents, config=config)
+            part = NS(inline_data=NS(data=buf.getvalue(), mime_type="image/png"), text=None)
+            return NS(candidates=[NS(content=NS(parts=[NS(inline_data=None, text="ok"), part]), finish_reason="STOP")])
+
+    real_types = __import__("google.genai.types", fromlist=["types"])
+    fake_genai = ModuleType("google.genai")
+    fake_genai.Client = lambda api_key: NS(models=Models())
+    fake_genai.types = real_types
+    import google
+    monkeypatch.setattr(google, "genai", fake_genai, raising=False)
+    monkeypatch.setitem(sys.modules, "google.genai", fake_genai)
+
+    prompt = imagegen.build_prompt({"name": "Nồi chiên"}, {"setting": "in a bright kitchen"})
+    out = tmp_path / "ai.jpg"
+    info = imagegen.generate([str(src)], prompt, str(out), "4:5", model="gemini-3.1-flash-image")
+    assert info == {"model": "gemini-3.1-flash-image", "simulated": False}
+    assert isinstance(calls["contents"][0], Image.Image) and calls["contents"][-1] == prompt
+    assert "Nồi chiên" in prompt and "in a bright kitchen" in prompt and "Do not add any text" in prompt
+    assert calls["config"].image_config.aspect_ratio == "4:5" and calls["config"].response_modalities == ["IMAGE"]
+    assert Image.open(out).size == (1080, 1350)
+    assert imagegen.price_per_image("gemini-3.1-flash-image") < imagegen.price_per_image("gemini-3-pro-image")
+
+
+def test_ai_image_check_uses_claude_vision(monkeypatch, tmp_path):
+    from types import SimpleNamespace as NS
+
+    from PIL import Image
+
+    from app import config
+    from app.services import imagegen
+    a, b = tmp_path / "a.jpg", tmp_path / "b.jpg"
+    Image.new("RGB", (900, 900), "red").save(a)
+    Image.new("RGB", (900, 1200), "red").save(b)
+    sent = {}
+
+    class FakeMessages:
+        def create(self, **kw):
+            sent.update(kw)
+            return NS(stop_reason="end_turn", model="claude-haiku-4-5",
+                      content=[NS(type="text", text=json.dumps({"same_product": True, "score": 12, "note": ""}))],
+                      usage=NS(input_tokens=800, output_tokens=40))
+
+    monkeypatch.setattr(config, "AI_ENABLED", True)
+    import anthropic
+    monkeypatch.setattr(anthropic, "Anthropic", lambda **k: NS(messages=FakeMessages()))
+    usage = []
+    result = imagegen.check(str(a), str(b), {"name": "Nồi"}, lambda *x: usage.append(x))
+    assert result == {"score": 10, "same_product": True, "note": ""} and imagegen.passed(result)
+    assert sent["model"] == "claude-haiku-4-5" and sent["output_config"]["format"]["type"] == "json_schema"
+    assert [c["type"] for c in sent["messages"][0]["content"]].count("image") == 2
+    assert usage == [("claude-haiku-4-5", 800, 40, False)]
+    assert not imagegen.passed({"score": 9, "same_product": False, "note": ""})
+    assert not imagegen.passed({"score": 6, "same_product": True, "note": ""})

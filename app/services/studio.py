@@ -2,9 +2,12 @@
 
 Quy trình cho 1 sản phẩm:
   1. Lấy ảnh gốc (link trong file Excel, ảnh tải lên, hoặc tự lấy từ link Shopee) và tải về máy chủ.
-  2. Claude xem ảnh + thông tin, soạn chữ (tiêu đề, điểm nổi bật, lời kêu gọi) và chọn thứ tự ảnh.
-  3. Dựng 3-5 ảnh 4:5 đã chỉnh + 1 video ngắn 9:16.
-  4. Làm thêm phiên bản khác màu / bố cục để mỗi page trong ngành đăng một kiểu riêng.
+  2. Claude xem ảnh + thông tin, soạn chữ (tiêu đề, điểm nổi bật, lời kêu gọi), chọn thứ tự ảnh
+     và nghĩ 3 ý tưởng bối cảnh riêng cho sản phẩm.
+  3. (Bật "Ảnh AI") Nano Banana đặt sản phẩm thật vào từng bối cảnh; Claude Haiku tự chấm, ảnh kém được tạo lại
+     hoặc đưa vào hàng chờ duyệt (imagegen.py).
+  4. Dựng 3-5 ảnh 4:5 (ảnh AI đạt + ảnh gốc) + 1 video ngắn 9:16.
+  5. Làm thêm phiên bản khác màu / bố cục / ảnh bìa để mỗi page trong ngành đăng một kiểu riêng.
 """
 import json
 import shutil
@@ -13,10 +16,10 @@ from datetime import timedelta
 from pathlib import Path
 
 import httpx
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageOps
 
 from app import config, db
-from app.services import catalog, creative, designer, shopee, video_maker
+from app.services import catalog, creative, designer, imagegen, shopee, video_maker
 
 _HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128.0 Safari/537.36",
             "Referer": "https://shopee.vn/"}
@@ -104,6 +107,72 @@ def source_images(conn, item_id: str, fetch: bool = True) -> list[str]:
     return paths
 
 
+def ai_image_count(conn) -> int:
+    """Số ảnh AI mỗi sản phẩm (0 = tắt)."""
+    s = db.get_settings(conn)
+    return max(1, min(3, int(s.get("ai_image_count", 3)))) if s.get("ai_images", True) else 0
+
+
+def ensure_ai_images(conn, item_id: str, product: dict, brief: dict, paths: list[str], aspect: str = "4:5",
+                     scenes: list[int] | None = None, record_usage=None) -> list[str]:
+    """Tạo ảnh AI còn thiếu cho các ý tưởng bối cảnh; trả về ảnh được dùng (đạt kiểm tra hoặc bạn đã duyệt).
+
+    Ảnh đã có và ý tưởng không đổi thì giữ nguyên (không tốn thêm tiền). Ảnh AI chấm thấp: tạo lại 1 lần,
+    vẫn thấp thì để trạng thái "review" (không tự dùng) cho bạn xem ở trang "Ảnh AI cần xem".
+    """
+    all_scenes = creative.clean_scenes(brief.get("scenes"))
+    if scenes is None:
+        scenes = list(range(min(ai_image_count(conn), len(all_scenes))))
+    order = [i for i in brief.get("image_order") or [] if i < len(paths)] or list(range(len(paths)))
+    refs = [paths[i] for i in order[:2]]
+    if not refs:
+        return []
+    folder = _dir("ai", _safe(item_id))
+    used = []
+    for idx in scenes:
+        prompt = imagegen.build_prompt(product, all_scenes[idx], aspect)
+        row = conn.execute("SELECT * FROM ai_images WHERE item_id = ? AND scene = ? AND aspect = ?",
+                           (item_id, idx, aspect)).fetchone()
+        if not (row and row["prompt"] == prompt and Path(row["path"]).exists()):
+            if row and row["path"]:
+                Path(row["path"]).unlink(missing_ok=True)
+            try:
+                result, dest, info = None, None, None
+                for attempt in range(2):                  # ảnh kém -> tạo lại 1 lần
+                    if dest:
+                        dest.unlink(missing_ok=True)
+                    dest = folder / f"s{idx}_{aspect.replace(':', 'x')}_{db.now().strftime('%H%M%S%f')}.jpg"
+                    info = imagegen.generate(refs, prompt, str(dest), aspect, seed=idx * 7 + attempt)
+                    conn.execute("INSERT INTO image_usage(ts, model, images, simulated) VALUES (?, ?, 1, ?)",
+                                 (db.now_iso(), info["model"], int(info["simulated"])))
+                    result = imagegen.check(refs[0], str(dest), product, record_usage)
+                    if imagegen.passed(result):
+                        break
+            except Exception as e:  # noqa: BLE001 - lỗi ảnh AI không làm hỏng bộ media: dùng ảnh gốc
+                db.log(conn, "error", f"Tạo ảnh AI lỗi cho sản phẩm {item_id}: {e}")
+                conn.commit()
+                continue
+            status = "ok" if imagegen.passed(result) else "review"
+            conn.execute(
+                """INSERT INTO ai_images(item_id, scene, aspect, prompt, path, ref_path, model, simulated, status,
+                                         score, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(item_id, scene, aspect) DO UPDATE SET prompt = excluded.prompt, path = excluded.path,
+                     ref_path = excluded.ref_path, model = excluded.model, simulated = excluded.simulated,
+                     status = excluded.status, score = excluded.score, note = excluded.note,
+                     created_at = excluded.created_at""",
+                (item_id, idx, aspect, prompt, str(dest), refs[0], info["model"], int(info["simulated"]), status,
+                 result["score"], result["note"], db.now_iso()),
+            )
+            if status == "review":
+                db.log(conn, "warn", f"Ảnh AI của sản phẩm {item_id} cần xem lại: {result['note'] or 'điểm thấp'}")
+            conn.commit()
+            row = conn.execute("SELECT * FROM ai_images WHERE item_id = ? AND scene = ? AND aspect = ?",
+                               (item_id, idx, aspect)).fetchone()
+        if row["status"] == "ok":
+            used.append(row["path"])
+    return used
+
+
 def get_brief(conn, item_id: str) -> dict | None:
     row = conn.execute("SELECT brief FROM media_kits WHERE item_id = ? AND brief != '{}' ORDER BY variant LIMIT 1",
                        (item_id,)).fetchone()
@@ -134,16 +203,19 @@ def build_kit(conn, item_id: str, variant: int = 0, brief: dict | None = None, n
         brief = creative.clean_brief(brief, len(paths))
 
         theme = (zlib.crc32(item_id.encode()) + variant) % len(designer.THEMES)
-        photos = [designer.enhance(p) for p in paths]
+        ai_paths = ensure_ai_images(conn, item_id, product, brief, paths, record_usage=record_usage)
+        photos = [designer.enhance(p) for p in paths] + [Image.open(a).convert("RGB") for a in ai_paths]
+        # ảnh AI (bối cảnh) lên trước, rồi tới ảnh gốc; brief lưu lại vẫn giữ thứ tự ảnh gốc
+        design = {**brief, "image_order": list(range(len(paths), len(photos))) + brief["image_order"]}
         out = _dir("kits", _safe(item_id), f"v{variant}")
         for old in out.glob("*"):
             old.unlink()
         feed_paths = []
-        for i, im in enumerate(designer.render_set(photos, brief, product, variant, designer.FEED, theme)):
+        for i, im in enumerate(designer.render_set(photos, design, product, variant, designer.FEED, theme)):
             path = out / f"anh_{i + 1}.jpg"
             im.save(path, "JPEG", quality=90, optimize=True)
             feed_paths.append(str(path))
-        video_brief = {**brief, "points": brief["video_lines"][1:-1] or brief["points"]}
+        video_brief = {**design, "points": brief["video_lines"][1:-1] or brief["points"]}
         story_paths = []
         for i, im in enumerate(designer.render_set(photos, video_brief, product, variant, designer.STORY, theme)):
             path = out / f"story_{i + 1}.jpg"
@@ -180,19 +252,37 @@ def build_ai_video(conn, item_id: str, variant: int = 0, style: str | None = Non
         if not paths:
             raise RuntimeError("Chưa có ảnh sản phẩm")
         order = [i for i in brief.get("image_order") or [] if i < len(paths)] or [0]
-        photo = designer.enhance(paths[order[variant % len(order)]])
         theme = designer.THEMES[(zlib.crc32(item_id.encode()) + variant) % len(designer.THEMES)]
         out = _dir("kits", _safe(item_id), f"v{variant}")
         frame = out / "veo_frame.jpg"
-        designer.veo_frame(photo, theme).save(frame, "JPEG", quality=92)
+        style = style or settings.get("veo_style", "scene")
+        negative = veo.NEGATIVE
+        if style == "scene":
+            # Ý tưởng riêng của sản phẩm: mỗi phiên bản 1 ý tưởng; khung đầu = ảnh AI 9:16 của ý tưởng đó
+            scenes = creative.clean_scenes(brief.get("scenes"))
+            scene = variant % max(1, min(len(scenes), ai_image_count(conn) or len(scenes)))
+            from app.services.pipeline import usage_recorder
+
+            ai = ensure_ai_images(conn, item_id, product, {**brief, "scenes": scenes}, paths, "9:16", [scene],
+                                  usage_recorder(conn)) if ai_image_count(conn) else []
+            if ai:
+                ImageOps.fit(Image.open(ai[0]).convert("RGB"), designer.STORY).save(frame, "JPEG", quality=92)
+                negative = veo.NEGATIVE_SCENE
+            else:
+                designer.veo_frame(designer.enhance(paths[order[variant % len(order)]]), theme).save(
+                    frame, "JPEG", quality=92)
+            prompt = veo.build_scene_prompt(product, scenes[scene], in_frame=bool(ai))
+        else:
+            designer.veo_frame(designer.enhance(paths[order[variant % len(order)]]), theme).save(
+                frame, "JPEG", quality=92)
+            prompt = veo.build_prompt(product, style)
         overlay = out / "veo_overlay.png"
         designer.video_overlay(brief, product, theme).save(overlay)
         stories = sorted(out.glob("story_*.jpg"), key=lambda p: int(p.stem.split("_")[1]))
         if not stories:
             raise RuntimeError("Thiếu cảnh cuối, hãy dựng lại bộ ảnh")
         clip = out / "veo_clip.mp4"
-        info = veo.generate(str(frame), veo.build_prompt(product, style or settings.get("veo_style", "studio")),
-                            str(clip))
+        info = veo.generate(str(frame), prompt, str(clip), negative=negative)
         conn.execute("INSERT INTO video_usage(ts, model, seconds, simulated) VALUES (?, ?, ?, ?)",
                      (db.now_iso(), info["model"], info["seconds"], int(info["simulated"])))
         final = out / "video_ai.mp4"
@@ -242,5 +332,5 @@ def ready_kits(conn, item_id: str) -> list:
 
 
 def delete_media(item_id: str) -> None:
-    for sub in ("kits", "src"):
+    for sub in ("kits", "src", "ai"):
         shutil.rmtree(Path(config.MEDIA_DIR) / sub / _safe(item_id), ignore_errors=True)

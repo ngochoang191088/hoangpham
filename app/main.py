@@ -72,8 +72,10 @@ def render(request: Request, name: str, **ctx) -> HTMLResponse:
         settings = db.get_settings(conn)
         ctx.setdefault("global_pause", settings["global_pause"])
         ctx.setdefault("veo_auto", settings.get("veo_auto", True))
-        ctx.setdefault("veo_style", settings.get("veo_style", "studio"))
+        ctx.setdefault("veo_style", settings.get("veo_style", "scene"))
         ctx.setdefault("veo_ready", bool(config.GEMINI_API_KEY))
+        ctx.setdefault("ai_review_count", conn.execute(
+            "SELECT COUNT(*) FROM ai_images WHERE status = 'review'").fetchone()[0])
         ctx.setdefault("unassigned_count", conn.execute(
             "SELECT COUNT(*) FROM pages WHERE niche = '' AND status != 'archived'").fetchone()[0])
     ctx.setdefault("user", request.session.get("user"))
@@ -1020,6 +1022,49 @@ def studio_build_many(request: Request, background: BackgroundTasks, ids: list[s
     return RedirectResponse(_with_msg(request.headers.get("referer") or "/studio", msg), 303)
 
 
+@app.get("/studio/qc", response_class=HTMLResponse)
+def studio_qc(request: Request, show: str = "review"):
+    """Ảnh AI cần xem: chỉ những ảnh AI tự chấm thấp (không tự dùng). Ảnh đạt thì không cần xem."""
+    status = show if show in ("review", "rejected", "ok") else "review"
+    with db.get_conn() as conn:
+        rows = conn.execute(
+            """SELECT ai_images.*, products.name AS product_name FROM ai_images
+               JOIN products ON products.item_id = ai_images.item_id
+               WHERE ai_images.status = ? ORDER BY ai_images.created_at DESC LIMIT 200""", (status,)).fetchall()
+        stats = dict(conn.execute("SELECT status, COUNT(*) FROM ai_images GROUP BY status").fetchall())
+    return render(request, "studio_qc.html", rows=rows, show=status, stats=stats)
+
+
+def _bg_rebuild(item_ids: list[str]) -> None:
+    for item_id in item_ids:
+        _bg_build(item_id)
+
+
+@app.post("/studio/ai-images/{image_id}/{action}")
+def studio_ai_image_action(request: Request, image_id: int, action: str, background: BackgroundTasks):
+    """approve: dùng ảnh · reject: không dùng · redo: xoá và tạo ảnh mới. Bộ ảnh của sản phẩm được dựng lại."""
+    if action not in ("approve", "reject", "redo"):
+        raise HTTPException(404)
+    with db.get_conn() as conn:
+        img = conn.execute("SELECT * FROM ai_images WHERE id = ?", (image_id,)).fetchone()
+        if not img:
+            raise HTTPException(404)
+        if action == "redo":
+            Path(img["path"]).unlink(missing_ok=True)
+            conn.execute("DELETE FROM ai_images WHERE id = ?", (image_id,))
+        else:
+            conn.execute("UPDATE ai_images SET status = ? WHERE id = ?",
+                         ("ok" if action == "approve" else "rejected", image_id))
+        rebuild = img["aspect"] == "4:5"               # ảnh 9:16 chỉ dùng cho lần tạo video AI sau
+        if rebuild:
+            _mark_processing(conn, [img["item_id"]])
+    if rebuild:
+        background.add_task(_bg_rebuild, [img["item_id"]])
+    msg = {"approve": "Đã duyệt ảnh, đang dựng lại bộ ảnh", "reject": "Đã bỏ ảnh, đang dựng lại bộ ảnh",
+           "redo": "Đang tạo ảnh AI mới cho ý tưởng này"}[action]
+    return RedirectResponse(_with_msg(request.headers.get("referer") or "/studio/qc", msg), 303)
+
+
 @app.get("/studio/{item_id}", response_class=HTMLResponse)
 def studio_detail(request: Request, item_id: str):
     with db.get_conn() as conn:
@@ -1031,12 +1076,18 @@ def studio_detail(request: Request, item_id: str):
         kits = conn.execute("SELECT * FROM media_kits WHERE item_id = ? ORDER BY variant", (item_id,)).fetchall()
         brief = studio.get_brief(conn, item_id)
         videos = conn.execute("SELECT * FROM videos WHERE item_id = ?", (item_id,)).fetchall()
+        ai_images = conn.execute("SELECT * FROM ai_images WHERE item_id = ? ORDER BY aspect, scene",
+                                 (item_id,)).fetchall()
+        ai_count = studio.ai_image_count(conn)
         used = conn.execute("""SELECT posts.media_type, COUNT(*) FROM posts WHERE item_id = ? AND status = 'published'
                                GROUP BY 1""", (item_id,)).fetchall()
     from app.services import veo
 
+    from app.services import imagegen
+
     return render(request, "studio.html", product=product, images=images, kits=kits, brief=brief,
-                  videos=videos, used=dict(used), themes=studio.designer.THEMES, veo_styles=veo.VEO_STYLES,
+                  videos=videos, used=dict(used), ai_images=ai_images, ai_count=ai_count,
+                  image_enabled=imagegen.enabled(), image_cost_vnd=imagegen.price_per_image() * config.USD_VND, themes=studio.designer.THEMES, veo_styles=veo.VEO_STYLES,
                   veo_enabled=veo.enabled(), veo_cost_vnd=veo.cost_per_video(config.VEO_MODEL) * config.USD_VND)
 
 
@@ -1070,13 +1121,18 @@ def studio_ai_video(item_id: str, background: BackgroundTasks, variant: int = Fo
 @app.post("/studio/{item_id}/brief")
 def studio_brief(item_id: str, background: BackgroundTasks, headline: str = Form(""), subheadline: str = Form(""),
                  points: str = Form(""), cta: str = Form(""), badge: str = Form(""), video_lines: str = Form(""),
-                 image_order: str = Form("")):
-    """Sửa chữ trên ảnh/video rồi dựng lại (không gọi AI)."""
+                 image_order: str = Form(""), scenes: str = Form(None)):
+    """Sửa chữ trên ảnh/video + ý tưởng bối cảnh rồi dựng lại (không gọi Claude; ý tưởng đổi -> tạo lại ảnh AI đó)."""
     order = [int(x) for x in image_order.replace(" ", "").split(",") if x.strip().isdigit()]
     brief = {"headline": headline, "subheadline": subheadline, "cta": cta, "badge": badge,
              "points": [x for x in points.splitlines() if x.strip()],
              "video_lines": [x for x in video_lines.splitlines() if x.strip()], "image_order": order}
     with db.get_conn() as conn:
+        if scenes is None:                             # form cũ không có ô ý tưởng: giữ ý tưởng đang có
+            brief["scenes"] = (studio.get_brief(conn, item_id) or {}).get("scenes")
+        else:                                          # mỗi dòng: tên | bối cảnh | chuyển động
+            brief["scenes"] = [dict(zip(("label", "setting", "motion"), [x.strip() for x in line.split("|")]))
+                               for line in scenes.splitlines() if line.count("|") >= 1]
         _mark_processing(conn, [item_id])
     background.add_task(_bg_build, item_id, False, brief)
     return go(f"/studio/{quote(item_id)}", "Đã lưu nội dung, đang dựng lại ảnh + video")
@@ -1165,14 +1221,21 @@ def settings_page(request: Request):
         actual = costs.actual_this_month(conn)
     from app.services import veo
 
+    from app.services import imagegen
+
     with db.get_conn() as c2:
+        month = db.now().strftime("%Y-%m")
         row = c2.execute("""SELECT COALESCE(SUM(seconds), 0), model FROM video_usage WHERE simulated = 0
-                            AND substr(ts, 1, 7) = ? GROUP BY model""", (db.now().strftime("%Y-%m"),)).fetchall()
+                            AND substr(ts, 1, 7) = ? GROUP BY model""", (month,)).fetchall()
         veo_month_usd = sum(r[0] * veo.price_per_second(r[1]) for r in row)
+        row = c2.execute("""SELECT COALESCE(SUM(images), 0), model FROM image_usage WHERE simulated = 0
+                            AND substr(ts, 1, 7) = ? GROUP BY model""", (month,)).fetchall()
+        image_month_usd = sum(r[0] * imagegen.price_per_image(r[1]) for r in row)
     return render(request, "settings.html", s=s, activity=activity, veo_styles=veo.VEO_STYLES, veo_enabled=veo.enabled(),
                   veo_models=veo.MODELS, veo_video_vnd=veo.cost_per_video(config.VEO_MODEL) * config.USD_VND,
                   veo_month_vnd=veo_month_usd * config.USD_VND, cost=_cost_table(cur[0], cur[1], s.get("ai_tier", "save")),
-                  actual=actual, posts_per_day=cur[1])
+                  actual=actual, posts_per_day=cur[1], image_enabled=imagegen.enabled(), image_models=imagegen.MODELS,
+                  image_vnd=imagegen.price_per_image() * config.USD_VND, image_month_vnd=image_month_usd * config.USD_VND)
 
 
 def _cost_table(active_pages: int, posts_per_day: float, current_tier: str) -> list[dict]:
@@ -1193,7 +1256,8 @@ def settings_save(request: Request, min_commission_rate: float = Form(...), min_
                   repeat_product_after_days: int = Form(...), post_hours: str = Form(...),
                   blacklist: str = Form(""), disclosure: str = Form(...), media_variants: int = Form(2),
                   kit_media: str = Form("alternate"), ai_tier: str = Form("save"), veo_style: str = Form("studio"),
-                  veo_audio: str = Form("mute"), veo_auto: bool = Form(False)):
+                  veo_audio: str = Form("mute"), veo_auto: bool = Form(False), ai_images: bool = Form(False),
+                  ai_image_count: int = Form(3)):
     try:
         hours = sorted({int(h) for h in post_hours.replace(" ", "").split(",") if h})
         assert hours and all(0 <= h <= 23 for h in hours)
@@ -1209,6 +1273,7 @@ def settings_save(request: Request, min_commission_rate: float = Form(...), min_
             "kit_media": kit_media if kit_media in ("alternate", "album", "video") else "alternate",
             "ai_tier": ai_tier if ai_tier in ("save", "balanced", "quality") else "save",
             "veo_style": veo_style, "veo_audio": "keep" if veo_audio == "keep" else "mute", "veo_auto": veo_auto,
+            "ai_images": ai_images, "ai_image_count": max(1, min(ai_image_count, 3)),
         }.items():
             db.set_setting(conn, key, value)
         db.log(conn, "info", "Cập nhật cài đặt chung")

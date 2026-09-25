@@ -4,6 +4,7 @@ Mỗi việc cần mức thông minh khác nhau, nên không cần dùng model �
   - classify: xếp sản phẩm vào ngành hàng (việc rất dễ)
   - creative: xem ảnh sản phẩm, soạn chữ ngắn in lên ảnh / video
   - caption:  viết bài đăng Facebook
+  - qc:       so ảnh AI với ảnh gốc, chấm điểm (việc dễ, luôn dùng Haiku cho rẻ)
 
 Chế độ:
   save      Tiết kiệm nhất: Claude Haiku 4.5 cho mọi việc (không bật suy nghĩ, ảnh gửi AI thu nhỏ).
@@ -13,9 +14,11 @@ Chế độ:
 from app import config, db
 
 TIERS = {
-    "save": {"classify": "claude-haiku-4-5", "creative": "claude-haiku-4-5", "caption": "claude-haiku-4-5"},
-    "balanced": {"classify": "claude-haiku-4-5", "creative": "claude-haiku-4-5", "caption": "claude-sonnet-5"},
-    "quality": {"classify": "claude-haiku-4-5", "creative": None, "caption": None},   # None = config.AI_MODEL
+    "save": {"classify": "claude-haiku-4-5", "creative": "claude-haiku-4-5", "caption": "claude-haiku-4-5",
+             "qc": "claude-haiku-4-5"},
+    "balanced": {"classify": "claude-haiku-4-5", "creative": "claude-haiku-4-5", "caption": "claude-sonnet-5",
+                 "qc": "claude-haiku-4-5"},
+    "quality": {"classify": "claude-haiku-4-5", "creative": None, "caption": None, "qc": "claude-haiku-4-5"},   # None = config.AI_MODEL
 }
 TIER_LABELS = {
     "save": "Tiết kiệm nhất: Claude Haiku 4.5 cho mọi việc",

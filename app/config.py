@@ -49,6 +49,8 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 VEO_MODEL = os.getenv("VEO_MODEL", "veo-3.1-lite-generate-001")
 VEO_RESOLUTION = os.getenv("VEO_RESOLUTION", "720p")
 VEO_SECONDS = int(os.getenv("VEO_SECONDS", "8"))
+# Ảnh AI (Nano Banana): đặt sản phẩm thật vào bối cảnh mới. Cùng GEMINI_API_KEY với Veo.
+IMAGE_MODEL = os.getenv("IMAGE_MODEL", "gemini-3.1-flash-image")
 
 DB_PATH = os.getenv("DB_PATH", "data/app.db")
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "data/uploads")
