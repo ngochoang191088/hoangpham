@@ -39,6 +39,16 @@ AI viết bài, app tự đăng **video** (nếu sản phẩm có video) hoặc 
      Veo tạo chuyển động ~8 giây giữ nguyên sản phẩm (kiểu: quay studio / cận cảnh rồi lùi ra / bối cảnh sử dụng),
      rồi app chèn lại tiêu đề + giá và nối cảnh cuối kêu gọi mua (~10 giây). Có video AI thì bài video ưu tiên dùng.
      Bấm tạo trong Studio, hoặc tick *Tạo video AI* khi dán link. Chưa có giọng đọc (làm sau).
+   - **🎞️ Dựng video theo nhạc** (trang *Dựng theo nhạc*): tải lên các **clip bạn tự quay** + **1 bài nhạc**, app tự:
+     - **nghe nhạc**: dò nhịp (BPM), tìm **đoạn sôi nhất** của bài (điệp khúc / drop) để dùng làm nhạc nền;
+     - **xem clip**: chấm điểm từng đoạn (nét, đủ sáng, tương phản, chuyển động), bỏ đoạn mờ / tối / rung;
+       tuỳ chọn cho **Claude xem ~40 ảnh thu nhỏ** và chấm thêm (bỏ cảnh quay sàn nhà, ngón tay che ống kính…);
+     - **cắt đúng nhịp**: đoạn nhạc sôi cắt mỗi 1 nhịp, đoạn êm 2-4 nhịp (hoặc chọn nhanh / vừa / chậm),
+       cảnh sôi ưu tiên đoạn nhiều chuyển động; điểm cắt tính theo từng khung hình nên không trôi khỏi nhịp;
+     - **chỉnh màu** (tự nhiên / ấm / điện ảnh / đen trắng), nháy sáng nhẹ ở nhịp mạnh, giữ hoặc tắt tiếng gốc;
+     - xuất cùng lúc **9:16, 4:5, 1:1, 16:9**. Bấm *Dựng lại* để ra bản khác, *Gắn vào sản phẩm* để bài đăng dùng video này.
+     Chạy trên máy (ffmpeg + numpy), không tốn phí. Dòng lệnh:
+     `python -m app.services.beat_editor clip1.mp4 clip2.mov --music nhac.mp3 --seconds 30 --aspect 9:16 --aspect 1:1`
 5. **AI viết bài** cho từng page, dựa trên tên, giá, mô tả bạn cung cấp, theo giọng văn của page.
    Nội dung được kiểm duyệt tự động (từ cấm, câu gây hiểu lầm, trùng lặp giữa các page).
 6. **Bạn duyệt và sửa bài ngay trên app** (mục *Duyệt bài*, phần **✏️ Sửa bài** ở mỗi bài): sửa nội dung
@@ -200,6 +210,7 @@ app/
     creative.py        Claude xem ảnh, soạn chữ trên ảnh / video (JSON)
     designer.py        chỉnh ảnh + thiết kế ảnh 4:5 và khung 9:16 (Pillow, font Be Vietnam Pro)
     video_maker.py     dựng video ngắn, ghép video AI + chữ + cảnh cuối (ffmpeg)
+    beat_editor.py     dựng video theo nhạc: dò nhịp, chấm điểm clip, cắt khớp beat, nhiều khổ
     veo.py             video AI bằng Google Veo 3.1 (Gemini API, image-to-video)
     pipeline.py        nhận diện page → tạo bài → đăng → đồng bộ số liệu
     shopee.py          nhận diện sản phẩm từ link Shopee (+ Open API tuỳ chọn)

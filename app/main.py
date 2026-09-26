@@ -13,7 +13,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from app import config, db
-from app.services import ai_writer, catalog, costs, facebook, importer, pipeline, quick_add, studio
+from app.services import ai_writer, beat_editor, catalog, costs, facebook, importer, pipeline, quick_add, studio
 
 BASE = Path(__file__).resolve().parent
 PUBLIC_PATHS = ("/login", "/auth/", "/logout")
@@ -1148,6 +1148,121 @@ def studio_caption(item_id: str):
         conn.execute("UPDATE products SET sample_caption = ? WHERE item_id = ?",
                      (f"[Viết cho page: {page['name']}]\n\n{caption}", item_id))
     return go(f"/studio/{quote(item_id)}#bai-viet", "AI đã viết thử bài đăng")
+
+
+# ---------------- Dựng video theo nhạc (clip tự quay + nhạc) ----------------
+
+def _beat_options(seconds: float, aspects: list[str], pace: str, grade: str, music_mode: str, keep_order: str,
+                  flash: str, original_audio: int, use_ai: str) -> dict:
+    return {
+        "seconds": min(max(seconds, 5), 180),
+        "aspects": [a for a in aspects if a in beat_editor.ASPECTS] or ["9:16"],
+        "pace": pace if pace in beat_editor.PACES else "auto",
+        "grade": grade if grade in beat_editor.GRADES else "natural",
+        "music_mode": "start" if music_mode == "start" else "auto",
+        "keep_order": bool(keep_order), "flash": bool(flash),
+        "original_audio": min(max(original_audio, 0), 100) / 100, "use_ai": bool(use_ai),
+    }
+
+
+def _music_library() -> list[str]:
+    folder = Path(config.MUSIC_DIR)
+    return sorted(p.name for p in folder.iterdir() if p.suffix.lower() in beat_editor.MUSIC_EXTS) \
+        if folder.is_dir() else []
+
+
+def _bg_beat(job_id: str) -> None:
+    with db.get_conn() as conn:
+        beat_editor.run_job(job_id, pipeline.usage_recorder(conn))
+
+
+@app.get("/beat", response_class=HTMLResponse)
+def beat_page(request: Request):
+    jobs = beat_editor.list_jobs()
+    with db.get_conn() as conn:
+        products = conn.execute("SELECT item_id, name FROM products WHERE blocked = 0 ORDER BY fetched_at DESC "
+                                "LIMIT 300").fetchall()
+    return render(request, "beat.html", jobs=jobs, products=products, music_library=_music_library(),
+                  aspects=beat_editor.ASPECT_LABELS, paces=beat_editor.PACES,
+                  grades={k: v[0] for k, v in beat_editor.GRADES.items()},
+                  running=any(j["status"] in ("queued", "running") for j in jobs))
+
+
+@app.post("/beat")
+def beat_create(background: BackgroundTasks, clips: list[UploadFile] = File(default=[]),
+                music_file: UploadFile | None = File(None), music_pick: str = Form(""),
+                seconds: float = Form(30), aspects: list[str] = Form(default=[]), pace: str = Form("auto"),
+                grade: str = Form("natural"), music_mode: str = Form("auto"), keep_order: str = Form(""),
+                flash: str = Form(""), original_audio: int = Form(0), use_ai: str = Form("")):
+    clips = [c for c in clips if c.filename]
+    if not clips:
+        return go("/beat", "Hãy chọn ít nhất 1 clip", error=True)
+    if any(Path(c.filename).suffix.lower() not in catalog.VIDEO_EXTS for c in clips):
+        return go("/beat", "Clip chỉ nhận .mp4, .mov, .m4v, .webm", error=True)
+    has_upload = music_file is not None and music_file.filename
+    if has_upload and Path(music_file.filename).suffix.lower() not in beat_editor.MUSIC_EXTS:
+        return go("/beat", "Nhạc chỉ nhận .mp3, .m4a, .wav, .aac, .ogg, .flac", error=True)
+    if not has_upload and music_pick not in _music_library():
+        return go("/beat", "Hãy tải lên 1 file nhạc hoặc chọn nhạc có sẵn", error=True)
+    options = _beat_options(seconds, aspects, pace, grade, music_mode, keep_order, flash, original_audio, use_ai)
+    job = beat_editor.new_job([], "", options)
+    folder = beat_editor.job_folder(job["id"]) / "input"
+    folder.mkdir(parents=True, exist_ok=True)
+
+    def store(upload: UploadFile, name: str) -> str:
+        path = folder / name
+        with path.open("wb") as fh:
+            shutil.copyfileobj(upload.file, fh, length=1024 * 1024)
+        return str(path)
+
+    safe = lambda n: "".join(c if c.isalnum() or c in "._-" else "_" for c in Path(n).name)[-60:]  # noqa: E731
+    job["clips"] = [store(c, f"{i:02d}_{safe(c.filename)}") for i, c in enumerate(clips)]
+    if has_upload:
+        job["music"] = store(music_file, "music_" + safe(music_file.filename))
+    else:
+        job["music"] = str(Path(config.MUSIC_DIR) / music_pick)
+    beat_editor.save_job(job)
+    background.add_task(_bg_beat, job["id"])
+    return go("/beat", f"Đang dựng video từ {len(clips)} clip (khoảng 1-3 phút). Trang tự tải lại khi xong.")
+
+
+@app.post("/beat/{job_id}/rerun")
+def beat_rerun(job_id: str, background: BackgroundTasks, seconds: float = Form(30),
+               aspects: list[str] = Form(default=[]), pace: str = Form("auto"), grade: str = Form("natural"),
+               music_mode: str = Form("auto"), keep_order: str = Form(""), flash: str = Form(""),
+               original_audio: int = Form(0), use_ai: str = Form("")):
+    job = beat_editor.load_job(job_id) if job_id.isalnum() else None
+    if not job:
+        raise HTTPException(404)
+    if job["status"] in ("queued", "running"):
+        return go("/beat", "Video này đang được dựng, chờ xong rồi dựng lại", error=True)
+    job.update(status="queued", step="Đang chờ…",
+               options=_beat_options(seconds, aspects, pace, grade, music_mode, keep_order, flash,
+                                     original_audio, use_ai))
+    beat_editor.save_job(job)
+    background.add_task(_bg_beat, job_id)
+    return go("/beat", "Đang dựng lại với lựa chọn mới (mỗi lần dựng lại ra 1 bản hơi khác)")
+
+
+@app.post("/beat/{job_id}/attach")
+def beat_attach(job_id: str, item_id: str = Form(...), aspect: str = Form("9:16")):
+    """Gắn video đã dựng vào sản phẩm: bài đăng của sản phẩm đó sẽ ưu tiên dùng video này."""
+    job = beat_editor.load_job(job_id) if job_id.isalnum() else None
+    if not job or aspect not in job.get("outputs", {}):
+        raise HTTPException(404)
+    with db.get_conn() as conn:
+        name = conn.execute("SELECT name FROM products WHERE item_id = ?", (item_id,)).fetchone()
+        if not name:
+            return go("/beat", "Không tìm thấy sản phẩm", error=True)
+        catalog.add_video(conn, item_id, file_path=job["outputs"][aspect], title=f"Video dựng theo nhạc {aspect}")
+    return go("/beat", f"Đã gắn video {aspect} vào “{name[0]}”")
+
+
+@app.post("/beat/{job_id}/delete")
+def beat_delete(job_id: str):
+    if job_id.isalnum():
+        beat_editor.delete_job(job_id)
+    return go("/beat", "Đã xoá")
 
 
 # ---------------- Cài đặt & chạy việc ----------------

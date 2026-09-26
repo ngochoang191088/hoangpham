@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}Dựng video theo nhạc{% endblock %}
+{% macro options(o) %}
+<div class="form-grid">
+  <label>Độ dài video
+    <select name="seconds">{% for s in [15, 30, 45, 60, 90] %}<option value="{{ s }}" {{ 'selected' if (o.seconds or 30) == s }}>{{ s }} giây</option>{% endfor %}</select></label>
+  <label>Nhịp cắt
+    <select name="pace">{% for k, v in paces.items() %}<option value="{{ k }}" {{ 'selected' if (o.pace or 'auto') == k }}>{{ v }}</option>{% endfor %}</select></label>
+  <label>Màu
+    <select name="grade">{% for k, v in grades.items() %}<option value="{{ k }}" {{ 'selected' if (o.grade or 'natural') == k }}>{{ v }}</option>{% endfor %}</select></label>
+  <label>Đoạn nhạc
+    <select name="music_mode"><option value="auto">Đoạn sôi nhất (điệp khúc)</option>
+      <option value="start" {{ 'selected' if o.music_mode == 'start' }}>Từ đầu bài</option></select></label>
+  <label>Tiếng gốc của clip
+    <select name="original_audio">{% for v, t in [(0, 'Tắt, chỉ nghe nhạc'), (25, 'Nhỏ (25%)'), (50, 'Vừa (50%)'), (90, 'To (90%)')] %}
+      <option value="{{ v }}" {{ 'selected' if ((o.original_audio or 0) * 100) | round | int == v }}>{{ t }}</option>{% endfor %}</select></label>
+</div>
+<div class="row small" style="margin-top:10px; gap:14px">
+  <span class="muted">Khổ video:</span>
+  {% for k, v in aspects.items() %}<label class="row"><input type="checkbox" name="aspects" value="{{ k }}" {{ 'checked' if k in (o.aspects or ['9:16']) }}> {{ v }}</label>{% endfor %}
+</div>
+<div class="row small" style="margin-top:6px; gap:14px">
+  <label class="row"><input type="checkbox" name="keep_order" value="1" {{ 'checked' if o.keep_order }}> Giữ thứ tự lúc quay (vlog, du lịch)</label>
+  <label class="row"><input type="checkbox" name="flash" value="1" {{ 'checked' if o.flash is not defined or o.flash }}> Nháy sáng nhẹ ở nhịp mạnh</label>
+  <label class="row" title="{{ '' if config.AI_ENABLED else 'Cần ANTHROPIC_API_KEY trong file .env' }}">
+    <input type="checkbox" name="use_ai" value="1" {{ 'checked' if o.use_ai }} {{ '' if config.AI_ENABLED else 'disabled' }}>
+    AI chấm cảnh đẹp (Claude xem ~40 ảnh thu nhỏ, tốn vài trăm đồng){% if not config.AI_ENABLED %} · <span class="muted">chưa có API key</span>{% endif %}</label>
+</div>
+{% endmacro %}
+{% block content %}
+<h1>🎞️ Dựng video theo nhạc</h1>
+<p class="muted">Tải lên các clip bạn tự quay + 1 bài nhạc. App tự <b>dò nhịp nhạc</b>, chọn <b>đoạn sôi nhất</b> của bài,
+  <b>chấm điểm từng đoạn clip</b> (bỏ đoạn mờ, tối, rung) và <b>cắt ghép đúng nhịp</b>: đoạn nhạc sôi cắt nhanh, đoạn êm cắt chậm.
+  Xuất cùng lúc nhiều khổ cho TikTok / Reels / Facebook / YouTube. Chạy trên máy chủ của bạn, không tốn phí (trừ khi bật AI chấm cảnh).</p>
+
+<form class="card" method="post" action="/beat" enctype="multipart/form-data" style="margin-bottom:18px">
+  <div class="form-grid">
+    <label>Clip tự quay (chọn nhiều file: .mp4, .mov…)
+      <input type="file" name="clips" accept="video/*,.mov,.mp4,.m4v,.webm" multiple required></label>
+    <label>Nhạc (.mp3, .m4a, .wav…)
+      <input type="file" name="music_file" accept="audio/*,.mp3,.m4a,.wav,.aac,.ogg,.flac"></label>
+    {% if music_library %}<label>…hoặc chọn nhạc có sẵn
+      <select name="music_pick"><option value="">(không)</option>{% for m in music_library %}<option>{{ m }}</option>{% endfor %}</select></label>{% endif %}
+  </div>
+  <div style="margin-top:12px">{{ options({}) }}</div>
+  <div class="row" style="margin-top:12px">
+    <button class="primary">🎬 Dựng video</button>
+    <span class="small muted">Clip dài tổng cộng nên gấp 2 lần video cần dựng để app có nhiều cảnh mà chọn.
+      Chỉ dùng nhạc bạn có quyền sử dụng, nếu không Facebook / YouTube có thể tắt tiếng video.</span>
+  </div>
+</form>
+
+<h2>Video đã dựng</h2>
+{% for j in jobs %}
+<div class="card" style="margin-bottom:14px">
+  <div class="row" style="justify-content:space-between">
+    <div class="row">
+      <span class="pill {{ {'done':'published','error':'failed'}.get(j.status, 'pending') }}">
+        {{ {'done':'Xong','error':'Lỗi','running':'Đang dựng…','queued':'Đang chờ…'}.get(j.status, j.status) }}</span>
+      <b>{{ j.clips | length }} clip</b>
+      <span class="small muted">{{ j.created_at[:16].replace('T', ' ') }}
+        {% if j.result.bpm %} · nhạc {{ j.result.bpm | round | int }} BPM · {{ j.result.shots | length }} cảnh · {{ j.result.seconds }} giây (từ giây {{ j.result.music_start }} của bài){% endif %}</span>
+    </div>
+    <form method="post" action="/beat/{{ j.id }}/delete" onsubmit="return confirm('Xoá video này và các clip đã tải lên?')">
+      <button class="small danger">Xoá</button></form>
+  </div>
+  {% if j.status in ('running', 'queued') %}<p class="small">{{ j.step }}</p>{% endif %}
+  {% if j.error %}<p class="small flag">{{ j.error }}</p>{% endif %}
+  {% if j.outputs %}
+  <div class="row" style="align-items:flex-start; gap:16px; margin-top:10px">
+    {% for aspect, path in j.outputs.items() %}
+    <div style="width: {{ 220 if aspect in ('9:16', '4:5') else 300 if aspect == '1:1' else 420 }}px; max-width:100%">
+      <video src="{{ path | media }}?v={{ j.version }}" controls preload="metadata" playsinline style="width:100%; aspect-ratio:{{ aspect.replace(':', '/') }}; border-radius:8px; background:#000"></video>
+      <div class="row small" style="justify-content:space-between">
+        <span>{{ aspect }}</span><a href="{{ path | media }}" download="video_{{ aspect.replace(':', 'x') }}.mp4">⬇ Tải về</a></div>
+      {% if products %}
+      <form class="row small" method="post" action="/beat/{{ j.id }}/attach" style="margin-top:4px">
+        <input type="hidden" name="aspect" value="{{ aspect }}">
+        <select name="item_id" style="max-width:150px">{% for p in products %}<option value="{{ p.item_id }}">{{ (p.name or p.item_id)[:40] }}</option>{% endfor %}</select>
+        <button class="small" title="Bài đăng của sản phẩm này sẽ dùng video này">Gắn vào sản phẩm</button>
+      </form>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% if j.status in ('done', 'error') %}
+  <details style="margin-top:10px">
+    <summary class="small">↻ Dựng lại với lựa chọn khác</summary>
+    <form method="post" action="/beat/{{ j.id }}/rerun" style="margin-top:8px">
+      {{ options(j.options) }}
+      <button class="primary" style="margin-top:10px">Dựng lại</button>
+    </form>
+  </details>
+  {% if j.result.shots %}
+  <details style="margin-top:6px">
+    <summary class="small">Kịch bản cắt ({{ j.result.shots | length }} cảnh)</summary>
+    <table class="small"><tr><th>Giây trên video</th><th>Clip</th><th>Lấy từ giây</th><th>Độ sôi nhạc</th></tr>
+      {% for s in j.result.shots %}<tr><td>{{ s.start }} → {{ s.end }}</td><td>{{ s.clip_name[3:] }}</td><td>{{ s.src_start }}</td>
+        <td>{{ (s.energy * 100) | round | int }}%</td></tr>{% endfor %}</table>
+  </details>
+  {% endif %}
+  {% endif %}
+</div>
+{% else %}<p class="muted">Chưa có video nào.</p>{% endfor %}
+{% if running %}<script>setTimeout(() => location.reload(), 5000)</script>{% endif %}
+{% endblock %}

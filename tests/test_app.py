@@ -1,6 +1,7 @@
 import json
 import os
 import tempfile
+from pathlib import Path
 
 os.environ["DB_PATH"] = os.path.join(tempfile.mkdtemp(), "test.db")
 os.environ["ADMIN_USER"] = "admin"
@@ -683,3 +684,141 @@ def test_post_editor_in_review(client, monkeypatch):
     client.post(f"/posts/{post_id}/edit", data={"caption": "hack"})
     with db.get_conn() as conn:
         assert conn.execute("SELECT caption FROM posts WHERE id = ?", (post_id,)).fetchone()[0] == new_caption
+
+
+# ---------------- Dựng video theo nhạc ----------------
+
+def _click_track(path, bpm=120.0, seconds=24.0, loud_from=10.0, sr=22050):
+    """Nhạc giả: tiếng trống đều theo bpm, từ giây loud_from đánh to hơn (đoạn "điệp khúc")."""
+    import wave
+
+    import numpy as np
+    y = np.zeros(int(sr * seconds))
+    burst = np.random.default_rng(0).standard_normal(int(0.03 * sr)) * np.exp(-np.arange(int(0.03 * sr)) / sr * 120)
+    beats = np.arange(0.25, seconds - 0.1, 60 / bpm)
+    for b in beats:
+        i = int(b * sr)
+        y[i:i + len(burst)] += burst * (0.9 if b >= loud_from else 0.3)
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(sr)
+        w.writeframes((np.clip(y, -1, 1) * 32767).astype(np.int16).tobytes())
+    return beats
+
+
+def _clip(path, src="testsrc2", seconds=6, size="320x240", audio=False):
+    import subprocess
+
+    from app.services import video_maker
+    cmd = [video_maker.ffmpeg_exe(), "-y", "-v", "error", "-f", "lavfi", "-t", str(seconds), "-i",
+           f"{src}{':' if '=' in src else '='}size={size}:rate=30"]
+    if audio:
+        cmd += ["-f", "lavfi", "-i", f"sine=f=440:duration={seconds}", "-shortest"]
+    subprocess.run(cmd + ["-c:v", "libx264", "-preset", "ultrafast", str(path)], check=True)
+    return str(path)
+
+
+def test_beat_detection_and_cut_plan(tmp_path):
+    import numpy as np
+
+    from app.services import beat_editor as be
+    truth = _click_track(tmp_path / "m.wav", bpm=120)
+    music = be.analyze_music(str(tmp_path / "m.wav"))
+    assert abs(music["bpm"] - 120) <= 2
+    beats = np.array(music["beats"])
+    errors = [np.min(np.abs(truth - b)) for b in beats]
+    assert np.median(errors) < 0.03 and len(beats) >= len(truth) - 3      # nhịp dò được trùng nhịp thật
+    start, end = be.pick_window(music, 8)
+    assert start >= 9.5 and end - start == pytest.approx(8, abs=0.01)    # chọn đoạn to (điệp khúc)
+    shots = be.plan_cuts(music, start, end, "fast")
+    assert shots[0]["start"] == 0 and shots[-1]["end"] == pytest.approx(end - start, abs=1e-3)
+    for s in shots[1:]:                                                   # mọi điểm cắt rơi đúng nhịp
+        assert np.min(np.abs(beats - (s["start"] + start))) < 1e-3
+    assert np.median([s["end"] - s["start"] for s in shots]) == pytest.approx(0.5, abs=0.05)
+    slow = be.plan_cuts(music, start, end, "slow")
+    assert len(slow) < len(shots) and all(s["end"] - s["start"] >= be.MIN_SHOT for s in slow)
+
+
+def test_beat_clip_scoring_skips_dark_footage(tmp_path):
+    from app.services import beat_editor as be
+    good = be.analyze_clip(_clip(tmp_path / "good.mp4"))
+    dark = be.analyze_clip(_clip(tmp_path / "dark.mp4", src="color=c=0x050505"))
+    be.finalize_scores([good, dark])
+    assert good["quality"].mean() > dark["quality"].mean() + 0.2
+    shots = [{"start": i * 0.5, "end": (i + 1) * 0.5, "energy": 0.5} for i in range(6)]
+    plan = be.choose_segments([good, dark], shots)
+    assert all(p["clip"] == 0 for p in plan)
+    starts = [p["src_start"] for p in plan]
+    assert len(set(starts)) == len(starts)                                # không lặp cùng 1 đoạn
+
+
+def test_beat_video_frame_exact_with_original_audio(tmp_path):
+    import subprocess
+
+    from app.services import beat_editor as be, video_maker
+    _click_track(tmp_path / "m.wav", seconds=16)
+    clips = [_clip(tmp_path / "a.mp4", audio=True), _clip(tmp_path / "b.mov", src="mandelbrot", size="240x320")]
+    result = be.make_edit(clips, str(tmp_path / "m.wav"), str(tmp_path / "out"), seconds=5,
+                          aspects=["9:16", "1:1"], pace="medium", original_audio=0.3, keep_order=True)
+    out = result["outputs"]["9:16"]
+    assert video_maker.probe_duration(out) == pytest.approx(5, abs=0.05)
+    probe = subprocess.run([video_maker.ffmpeg_exe(), "-i", out, "-map", "0:v", "-f", "null", "-"],
+                           capture_output=True, text=True).stderr
+    assert "frame=  150" in probe                                        # đúng 5 giây x 30 khung, không trôi nhịp
+    assert "1080x1920" in subprocess.run([video_maker.ffmpeg_exe(), "-i", out], capture_output=True, text=True).stderr
+    assert video_maker.has_audio(out) and Path(result["outputs"]["1:1"]).exists()
+    assert not list((tmp_path / "out").glob("_parts_*"))                 # dọn file tạm
+
+
+def test_beat_page_upload_render_and_attach(client, tmp_path):
+    from app.services import beat_editor as be
+    _click_track(tmp_path / "m.wav", seconds=12)
+    clip = _clip(tmp_path / "c.mp4", seconds=5)
+    assert client.get("/beat").status_code == 200
+    r = client.post("/beat", data={"seconds": "5", "aspects": ["9:16"], "pace": "auto", "flash": "1"},
+                    files=[("clips", ("c.mp4", open(clip, "rb"), "video/mp4")),
+                           ("music_file", ("m.wav", open(tmp_path / "m.wav", "rb"), "audio/wav"))])
+    assert r.status_code == 200
+    job = be.list_jobs()[0]
+    assert job["status"] == "done", job["error"]
+    page = client.get("/beat").text
+    assert "video_9x16.mp4" in page and "Gắn vào sản phẩm" in page
+    assert client.get(page.split('<video src="')[1].split("?")[0]).status_code == 200
+    with db.get_conn() as conn:
+        item_id = conn.execute("SELECT item_id FROM products LIMIT 1").fetchone()[0]
+    client.post(f"/beat/{job['id']}/attach", data={"item_id": item_id, "aspect": "9:16"})
+    with db.get_conn() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM videos WHERE item_id = ? AND file_path = ?",
+                            (item_id, job["outputs"]["9:16"])).fetchone()[0] == 1
+    client.post(f"/beat/{job['id']}/rerun", data={"seconds": "5", "aspects": ["1:1"], "pace": "slow"})
+    job = be.load_job(job["id"])
+    assert job["status"] == "done" and list(job["outputs"]) == ["1:1"] and job["version"] == 2
+    r = client.post("/beat", files=[("clips", ("x.txt", b"no", "text/plain"))])
+    assert "err=1" in str(r.url)
+    client.post(f"/beat/{job['id']}/delete")
+    assert be.load_job(job["id"]) is None
+
+
+def test_beat_ai_rating_uses_vision(monkeypatch, tmp_path):
+    from types import SimpleNamespace as NS
+
+    import anthropic
+
+    from app import config
+    from app.services import beat_editor as be
+    clip = be.analyze_clip(_clip(tmp_path / "a.mp4", seconds=4))
+    sent = {}
+
+    class FakeMessages:
+        def create(self, **kw):
+            sent.update(kw)
+            return NS(model="claude-haiku-4-5", content=[NS(type="text", text='{"scores": [9, 1]}')],
+                      usage=NS(input_tokens=900, output_tokens=20))
+
+    monkeypatch.setattr(config, "AI_ENABLED", True)
+    monkeypatch.setattr(anthropic, "Anthropic", lambda **k: NS(messages=FakeMessages()))
+    usage = []
+    be.ai_rate([clip], lambda *a: usage.append(a))
+    images = [c for c in sent["messages"][0]["content"] if c["type"] == "image"]
+    assert len(images) == 2 and sent["output_config"]["format"]["type"] == "json_schema"
+    assert clip["ai"][0] > 1.0 and clip["ai"][-1] < 0.5                  # 2 giây đầu đẹp, 2 giây sau xấu
+    assert usage == [("claude-haiku-4-5", 900, 20, False)]
