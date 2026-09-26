@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1b1330"/><stop offset=".55" stop-color="#2a1426"/><stop offset="1" stop-color="#3d1418"/>
+    </linearGradient>
+    <radialGradient id="glow1" cx=".82" cy=".18" r=".55">
+      <stop offset="0" stop-color="#ff6a3d" stop-opacity=".55"/><stop offset="1" stop-color="#ff6a3d" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow2" cx=".12" cy=".9" r=".5">
+      <stop offset="0" stop-color="#ffb627" stop-opacity=".30"/><stop offset="1" stop-color="#ffb627" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="dots" width="40" height="40" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1.6" fill="#fff" fill-opacity=".07"/>
+    </pattern>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#g)"/>
+  <rect width="1920" height="1080" fill="url(#dots)"/>
+  <rect width="1920" height="1080" fill="url(#glow1)"/>
+  <rect width="1920" height="1080" fill="url(#glow2)"/>
+  <!-- chữ H lớn mờ + vương miện -->
+  <g fill="none" stroke="#fff" stroke-opacity=".06" stroke-width="6">
+    <path d="M1240 380 h170 v200 h240 v-200 h170 v620 h-170 v-265 h-240 v265 h-170 Z"/>
+    <path d="M1230 320 L1280 130 L1400 230 L1490 80 L1580 230 L1700 130 L1750 320 Z"/>
+  </g>
+  <!-- vòng tròn trang trí -->
+  <circle cx="260" cy="200" r="120" fill="none" stroke="#ffb627" stroke-opacity=".18" stroke-width="3"/>
+  <circle cx="260" cy="200" r="190" fill="none" stroke="#ffb627" stroke-opacity=".08" stroke-width="2"/>
+  <path d="M0 900 C 420 780, 760 1040, 1180 930 S 1760 800, 1920 880 V1080 H0 Z" fill="#ee4d2d" fill-opacity=".10"/>
+  <path d="M0 980 C 480 880, 820 1080, 1300 1000 S 1800 920, 1920 960 V1080 H0 Z" fill="#ee4d2d" fill-opacity=".12"/>
+</svg>

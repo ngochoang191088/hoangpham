@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{% block title %}Tổng quan{% endblock %} · Quản lý Page</title>
+<title>{% block title %}Tổng quan{% endblock %} · hwangzada</title>
+<link rel="icon" href="/static/brand/logo.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/static/style.css">
 <script src="/static/chart.umd.js"></script>
 </head>
@@ -12,7 +13,7 @@
 {% if global_pause %}<div class="banner pause">ĐANG DỪNG KHẨN CẤP: không page nào được đăng bài.</div>{% endif %}
 <header>
   <nav class="nav">
-    <span class="brand">🛒 Aff Pages</span>
+    <a class="brand" href="/"><img src="/static/brand/logo.svg" alt="" width="28" height="28"><span class="word">hwang<b>zada</b></span></a>
     {% set path = request.url.path %}
     <a class="item {{ 'on' if path == '/' }}" href="/">Tổng quan</a>
     <a class="item {{ 'on' if path.startswith('/niches') }}" href="/niches">Ngành hàng</a>

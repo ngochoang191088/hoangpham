@@ -3,13 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Đăng nhập · Aff Pages</title>
+<title>Đăng nhập · hwangzada</title>
+<link rel="icon" href="/static/brand/logo.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/static/style.css">
 </head>
-<body>
+<body class="login">
 <main style="max-width:440px; padding-top:10vh">
   <div class="card" style="padding:28px">
-    <div class="brand" style="font-size:22px; padding:0">🛒 Aff Pages</div>
+    <div class="login-brand"><img src="/static/brand/logo.svg" alt="" width="64" height="64"><span class="word">hwang<b>zada</b></span></div>
     <p class="muted">Quản lý hàng trăm fanpage bán hàng affiliate Shopee: AI viết bài, tự đăng video / ảnh, báo cáo hoa hồng.</p>
     {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
     {% if config.FB_LOGIN_ENABLED %}
