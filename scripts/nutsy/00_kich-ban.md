@@ -1,7 +1,7 @@
 # NUTSY: NHIỆM VỤ BẤT KHẢ THI Ở MÁY ĂN CHIM
 
 **Thể loại:** Hoạt hình ngắn, hài hành động (heist comedy), không thoại, kể bằng hình ảnh
-**Thời lượng:** khoảng 7 phút
+**Thời lượng:** khoảng 4–5 phút sau khi dựng (53 shot Veo, xem `02_prompt-veo-tung-shot.md`)
 **Tông:** Scrat trong *Ice Age* gặp *Mission: Impossible* và *Home Alone*. Nhân vật nói bằng biểu cảm, âm thanh và nhạc.
 
 ---
