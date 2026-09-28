@@ -1,6 +1,7 @@
 """Gọi Claude API: văn bản tự do (viết chương) và JSON có cấu trúc (dàn ý, phê bình, ghi chép)."""
 import copy
 import json
+import re
 import threading
 from collections import defaultdict
 
@@ -112,22 +113,28 @@ class MockLLM:
 
     def __init__(self):
         self.usage = Usage()
-        self._reviews = 0
+        self._seen_reviews = set()
 
     def text(self, *, system: str, content: list[dict], **_) -> str:
         prompt = content[-1]["text"]
+        scenes = re.search(r"BIÊN KỊCH: Viết kịch bản cho các cảnh (\d+)-(\d+)", prompt)
+        if scenes:
+            return "\n\n".join(f"CẢNH {n}. NỘI. NHÀ BÀ NGOẠI - ĐÊM\n\nMưa gõ lên mái tôn. LAN (20) đếm tiền lẻ.\n\n"
+                                 f"LAN: Mai con đi sớm." for n in range(int(scenes[1]), int(scenes[2]) + 1))
         if "TÓM TẮT PHẦN" in prompt:
             return "Tóm tắt phần (giả lập): các nhân vật chính vượt qua thử thách đầu tiên và bí ẩn lớn dần."
         paragraph = ("Gió lùa qua con hẻm nhỏ, mang theo mùi mưa đầu mùa. Anh đứng lặng rất lâu trước cánh cửa gỗ, "
                      "nghe tim mình đập từng nhịp chậm rãi như tiếng đồng hồ cũ trong nhà ngoại. ")
         return "\n\n".join(paragraph * 3 for _ in range(4))
 
-    def parse(self, schema: type[BaseModel], **_) -> BaseModel:
+    def parse(self, schema: type[BaseModel], *, content: list[dict] = (), **_) -> BaseModel:
         data = _fake(strict_schema(schema))
-        if schema.__name__ == "Review":
-            self._reviews += 1
-            data["score"] = 7.0 if self._reviews <= 3 else 8.5   # vòng đầu chưa đạt -> thử vòng sửa
-            if data["score"] >= 8:
+        if schema.__name__.endswith("Review"):
+            task = content[-1]["text"] if content else ""
+            first_time = task not in self._seen_reviews   # lần chấm đầu của mỗi nhiệm vụ chưa đạt -> chạy thử vòng sửa
+            self._seen_reviews.add(task)
+            data["score"] = 7.0 if first_time else 8.5
+            if not first_time:
                 data["issues"] = []
         return schema.model_validate(data)
 

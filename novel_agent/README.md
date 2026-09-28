@@ -72,3 +72,47 @@ Mỗi truyện nằm trong `data/novels/<tên-truyện>/`:
 - Giảm chi phí: `NOVEL_MAX_REVISIONS=1`, `NOVEL_CRITIC_EFFORT=low`, hoặc đặt `NOVEL_CRITIC_MODEL=claude-sonnet-5` cho hội đồng.
 - Khắt khe hơn: `NOVEL_PASS_SCORE=8.5`.
 - Thêm / bớt nhà phê bình: sửa `CRITICS` trong `novel_agent/prompts.py` (ví dụ thêm "chuyên gia lịch sử" cho truyện lịch sử).
+
+---
+
+# 🎬 Chế độ viết kịch bản phim (`script`)
+
+Phương pháp chắt lọc từ bộ skill [jtydhr88/screenwriting-skills](https://github.com/jtydhr88/screenwriting-skills) (MIT),
+vốn tổng hợp McKee, Syd Field, Blake Snyder, Egri, Lục Quân...: **không nhảy thẳng từ ý tưởng sang viết**, mà đi đúng thứ tự
+tiền đề → kết phim → cấu trúc → nhân vật → danh sách cảnh → kịch bản → sửa theo bộ câu hỏi chẩn đoán.
+
+| Giai đoạn | Việc làm |
+|---|---|
+| 1-3. Phát triển | Logline, tiền đề (tính cách → dẫn tới → kết cục), tư tưởng chủ đạo, lõi kịch, **kết phim chốt trước**, bảng nhịp theo phút (phim ngắn ≤ 40 phút dùng khởi-thừa-chuyển-hợp), nhân vật ba chiều + giọng nói riêng, con dao của đối thủ, thứ trói buộc hai bên. |
+| 4. Danh sách cảnh | Mỗi cảnh: tiêu đề, một câu, **giá trị mở → đóng (phải đảo chiều)**, ai muốn gì / ai cản / ai thắng, số giây. AI biên tập cấu trúc chấm và bắt sửa (tối đa 2 vòng). **Dừng lại để bạn duyệt.** |
+| 5. Viết | Viết theo từng đợt ~5 phút phim, thể thức đánh số cảnh kiểu Việt Nam (`CẢNH 3. NGOẠI. BẾN XE - ĐÊM`, `LAN: ...`), ~1 trang / 1 phút. |
+| 6. Hội đồng 5 AI | Biên tập **cấu trúc**, **nhân vật**, **cảnh**, **thoại**, **thể thức** - mỗi người chạy bộ câu hỏi chẩn đoán riêng, chỉ ra số cảnh lỗi. Biên tập viên sửa viết lại đúng các cảnh bị góp ý, lặp tới khi cả 5 chấm ≥ 8. |
+
+```bash
+# 1. Phát triển tới danh sách cảnh (phim 15 phút), rồi DỪNG để bạn đọc
+python -m novel_agent script new "Cô bé bán vé số ở Sài Gòn phát hiện người mua vé mỗi ngày là cha mình" \
+    --minutes 15 --genre "tâm lý gia đình" --notes "quay được với 3 diễn viên, 4 bối cảnh, ngân sách thấp"
+
+# 2. Chưa ưng thì bảo AI sửa danh sách cảnh (lặp lại bao nhiêu lần cũng được)
+python -m novel_agent script plan co-be-ban-ve-so --note "kết mở hơn, bỏ cảnh bệnh viện, thêm một cảnh không lời ở chợ"
+
+# 3. Ưng rồi thì viết + hội đồng chấm + sửa -> xuất .txt và .docx
+python -m novel_agent script write co-be-ban-ve-so
+
+# Chấm/sửa thêm (sau khi bạn tự sửa tay trong project.json), xem trạng thái, xuất lại
+python -m novel_agent script revise co-be-ban-ve-so --rounds 1     # --rounds 0 = chỉ chấm, không sửa
+python -m novel_agent script status co-be-ban-ve-so
+python -m novel_agent script export co-be-ban-ve-so
+python -m novel_agent script list
+
+# --auto: không dừng duyệt, viết luôn tới cuối.   --mock: chạy giả lập, không tốn tiền.
+```
+
+Mỗi kịch bản nằm trong `data/scripts/<tên>/`: `project.json` (toàn bộ dữ liệu, góp ý từng vòng),
+`<tên>.txt` / `.docx` (kịch bản), và **`story-bible.md`** theo đúng mẫu của skill `sw-workflow` -
+mở repo bằng Claude Code có plugin screenwriting là có thể nói "làm tiếp kịch bản của tao" và nó đọc được tiến độ.
+
+Mẹo để có kịch bản quay được:
+- Ghi rõ ràng buộc sản xuất trong `--notes` (số diễn viên, bối cảnh, ngày quay, ngân sách) - AI sẽ viết cho vừa.
+- Dành thời gian ở bước 2 (danh sách cảnh): sửa ở đây rẻ và hiệu quả hơn nhiều so với sửa kịch bản.
+- Sau khi có bản cuối, **đọc to cùng diễn viên** trước khi quay - thoại nghe khác hẳn khi đọc thầm.

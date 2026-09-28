@@ -116,3 +116,34 @@ def test_refusal_raises():
     llm = ClaudeLLM(_stub_client(_message("", stop="refusal"), []))
     with pytest.raises(LLMError):
         llm.text(system="s", content=[{"type": "text", "text": "t"}])
+
+
+# ---------- chế độ kịch bản phim ----------
+from novel_agent import screenplay  # noqa: E402
+
+
+def test_split_scenes():
+    text = "CẢNH 1. NỘI. NHÀ - ĐÊM\n\nAn ngồi.\n\nCẢNH 2. NGOẠI. SÂN - NGÀY\n\nMưa.\n\ncảnh 10: NỘI. XE - ĐÊM\nChạy."
+    got = screenplay.split_scenes(text)
+    assert list(got) == [1, 2, 10]
+    assert got[2].startswith("CẢNH 2.") and got[2].endswith("Mưa.")
+
+
+def test_screenplay_pipeline(tmp_path):
+    studio = screenplay.ScriptStudio(MockLLM(), log=lambda _: None)
+    project = studio.create("Cô gái bán vé số tìm cha", minutes=12, base=tmp_path)
+    assert project.state["stage"] == "approve"                       # dừng chờ tác giả duyệt danh sách cảnh
+    assert len(project.state["outline_reviews"]) == 2                 # vòng đầu bị trả về, sửa, vòng hai đạt
+    assert (project.path / "story-bible.md").exists()
+
+    studio.plan(project, note="đổi kết thành kết mở")
+    assert "Tác giả yêu cầu" in project.state["log"][0]
+
+    studio.draft(project)
+    assert list(project.scenes()) == [c.number for c in project.outline.scenes]
+    assert studio.revise(project) is True
+    assert project.state["reviews"][0]["passed"] is False and project.state["reviews"][-1]["passed"] is True
+    assert all(t.startswith("CẢNH") for t in project.scenes().values())   # cảnh sửa vẫn giữ dòng tiêu đề
+    txt, docx = screenplay.export(project)
+    assert "CẢNH" in txt.read_text(encoding="utf-8") and docx.exists()
+    assert "đã qua hội đồng" in (project.path / "story-bible.md").read_text(encoding="utf-8")

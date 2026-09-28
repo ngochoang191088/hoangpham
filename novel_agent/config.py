@@ -37,6 +37,7 @@ RECENT_CHAPTERS = int(os.getenv("NOVEL_RECENT_CHAPTERS", "5"))
 TAIL_CHARS = int(os.getenv("NOVEL_TAIL_CHARS", "3000"))
 
 NOVEL_DIR = Path(os.getenv("NOVEL_DIR", str(ROOT / "data" / "novels")))
+SCRIPT_DIR = Path(os.getenv("SCRIPT_DIR", str(ROOT / "data" / "scripts")))
 
 # 1 = chạy giả lập (không gọi API, không tốn tiền) để thử quy trình
 MOCK = os.getenv("NOVEL_MOCK", "0") == "1"
