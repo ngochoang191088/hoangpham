@@ -5,30 +5,9 @@
         "source": "github",
         "repo": "jtydhr88/screenwriting-skills"
       }
-    },
-    "cw": {
-      "source": {
-        "source": "github",
-        "repo": "haowjy/creative-writing-skills"
-      }
-    },
-    "story-skills": {
-      "source": {
-        "source": "github",
-        "repo": "danjdewhurst/story-skills"
-      }
-    },
-    "author-toolkit": {
-      "source": {
-        "source": "github",
-        "repo": "rhavekost/author-toolkit"
-      }
     }
   },
   "enabledPlugins": {
-    "screenwriting@screenwriting-skills": true,
-    "creative-writing-skills@cw": true,
-    "story-skills@story-skills": true,
-    "author-toolkit@author-toolkit": true
+    "screenwriting@screenwriting-skills": true
   }
 }
