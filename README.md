@@ -4,6 +4,8 @@ Bạn **đăng nhập bằng Facebook cá nhân**, app tự nhận diện tất 
 Bạn chỉ cần: **chọn ngành hàng cho page → nhập file sản phẩm + link aff + video của từng ngành → duyệt bài**.
 AI viết bài, app tự đăng **video** (nếu sản phẩm có video) hoặc **ảnh sản phẩm**, và báo cáo kết quả.
 
+> 📖 Repo này còn có **hệ thống AI viết tiểu thuyết** nhiều phần, có hội đồng AI phê bình và sửa: xem [novel_agent/README.md](novel_agent/README.md).
+
 ## Quy trình
 
 1. **Đăng nhập bằng Facebook**: app lấy danh sách page (kèm quyền đăng bài) của tài khoản. Page mới tạo sau này:
