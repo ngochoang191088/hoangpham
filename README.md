@@ -61,6 +61,18 @@ AI viết bài, app tự đăng **video** (nếu sản phẩm có video) hoặc 
 | **Duyệt bài** | **Chi tiết một page** |
 | ![](docs/review.png) | ![](docs/page.png) |
 
+## Tool tải ảnh sản phẩm Shopee (mỗi sản phẩm 1 thư mục)
+
+1. Nháy đúp **`tai_anh_shopee.bat`**. Lần đầu tool tạo file `danh_sach_link.txt` và mở bằng Notepad.
+2. Dán link sản phẩm Shopee vào, mỗi dòng 1 link. Dùng được link đầy đủ, link rút gọn / link aff `s.shopee.vn/...`,
+   hoặc mã hàng dạng `mã shop.mã sản phẩm` (ví dụ `1496179755.41457616922`). Có thể dùng file Excel / Word thay cho file txt.
+3. Lưu file, nháy đúp lại `tai_anh_shopee.bat`. Ảnh nằm trong thư mục `anh_san_pham/`:
+   `<mã sản phẩm> - <tên sản phẩm>/01.jpg, 02.jpg...` kèm `thong_tin.txt` (tên, giá, đã bán, mô tả) và `ket_qua.csv` tổng hợp.
+
+Shopee hay chặn cách lấy nhanh, khi đó mỗi sản phẩm chỉ được 1 ảnh. Chạy chế độ trình duyệt để lấy đủ ảnh:
+mở cửa sổ lệnh trong thư mục app, gõ `tai_anh_shopee.bat --browser`. Tool mở Edge / Chrome có sẵn trên máy;
+lần đầu Shopee đòi đăng nhập thì đăng nhập trong cửa sổ đó (chỉ 1 lần). Chạy lại tool sẽ bỏ qua sản phẩm đã có ảnh.
+
 ## Chạy thử online (không cần cài gì)
 
 Dùng gói miễn phí của [Render.com](https://render.com), app chạy trên mạng với link `https://...onrender.com`:

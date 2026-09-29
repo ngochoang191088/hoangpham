@@ -4,3 +4,5 @@ __pycache__/
 data/
 .pytest_cache/
 aff-pages.zip
+anh_san_pham/
+danh_sach_link.txt
