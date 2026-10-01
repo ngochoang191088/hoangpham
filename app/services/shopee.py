@@ -20,7 +20,8 @@ from app import config
 
 ENDPOINT = "https://open-api.affiliate.shopee.vn/graphql"
 
-# sortType của productOfferV2: 5 = hoa hồng cao -> thấp
+# sortType của productOfferV2: 2 = bán chạy nhất, 5 = hoa hồng cao -> thấp
+SORT_SALES_DESC = 2
 SORT_COMMISSION_DESC = 5
 
 
@@ -58,12 +59,12 @@ query($keyword: String, $sortType: Int, $page: Int, $limit: Int) {
 """
 
 
-def search_products(keyword: str, limit: int = 20) -> list[dict]:
-    """Sản phẩm theo từ khoá, sắp xếp hoa hồng cao nhất trước."""
+def search_products(keyword: str, limit: int = 20, sort_type: int = SORT_COMMISSION_DESC) -> list[dict]:
+    """Sản phẩm theo từ khoá, mặc định sắp xếp hoa hồng cao nhất trước."""
     if not config.SHOPEE_ENABLED:
         return _demo_products(keyword, limit)
     data = _call(PRODUCT_QUERY, {
-        "keyword": keyword, "sortType": SORT_COMMISSION_DESC, "page": 1, "limit": limit,
+        "keyword": keyword, "sortType": sort_type, "page": 1, "limit": limit,
     })
     result = []
     for n in data["productOfferV2"]["nodes"]:

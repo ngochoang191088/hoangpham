@@ -61,6 +61,38 @@ AI viết bài, app tự đăng **video** (nếu sản phẩm có video) hoặc 
 | **Duyệt bài** | **Chi tiết một page** |
 | ![](docs/review.png) | ![](docs/page.png) |
 
+## Tool săn sản phẩm aff Shopee hằng ngày
+
+Nháy đúp **`san_aff_shopee.bat`**. Lần đầu tool tạo `tu_khoa.txt` (từ khoá mẫu theo ngành): sửa cho đúng ngành bạn chạy.
+Mỗi từ khoá tool lấy danh sách **hoa hồng cao nhất** và **bán chạy nhất** từ Shopee, lọc (mặc định hoa hồng ≥ 8%,
+đã bán ≥ 500, ≥ 4.7 sao), xếp theo tiền hoa hồng kỳ vọng mỗi đơn, rồi tạo link aff:
+`san_pham_aff/<ngày>.xlsx` (bảng chi tiết, cột "Mới?" đánh dấu sản phẩm chưa có hôm trước) và `<ngày>_link_aff.txt`.
+Đổi tiêu chí: `san_aff_shopee.bat --hoa-hong 10 --da-ban 1000 --top 20`.
+
+Cần **Shopee Affiliate Open API**: vào https://affiliate.shopee.vn → mục Open API → đăng ký, được duyệt thì điền
+`SHOPEE_APP_ID`, `SHOPEE_APP_SECRET` vào file `.env`. Xem thử trước bằng dữ liệu giả: `san_aff_shopee.bat --demo`.
+
+## Tool tải video viral TikTok / Douyin / YouTube Shorts
+
+Nháy đúp **`tai_video_viral.bat`**. Lần đầu tool tạo `kenh.txt`: dán link các kênh (mỗi dòng 1 kênh, dòng `[Tên nhóm]`
+để chia thư mục). Dùng được kênh TikTok (`https://www.tiktok.com/@ten`), hashtag TikTok (`/tag/...`),
+kênh Douyin (`https://www.douyin.com/user/...`) và YouTube Shorts (`https://www.youtube.com/@ten/shorts`).
+
+Tool xem 30 video mới nhất mỗi kênh, chấm "viral" bằng cách so lượt xem với mức thường của chính kênh đó
+(gấp 5 lần mức thường = đang viral), cộng điểm khi tỷ lệ thích / bình luận / chia sẻ cao, rồi tải 80 clip điểm cao nhất
+(mỗi kênh tối đa 5) vào `video_viral/<ngày>/<nhóm>/`, kèm `danh_sach.csv` (tác giả, link gốc, lượt xem, điểm).
+Video đã tải không bị tải lại hôm sau. Tuỳ chỉnh: `--so-clip 80 --ngay 7 --toi-da-moi-kenh 5 --min-view 10000 --max-giay 90`.
+
+- Muốn đủ 80 clip/ngày cần khoảng 30-50 kênh trong `kenh.txt`.
+- Douyin: tool mở Edge / Chrome có sẵn; lần đầu Douyin đòi đăng nhập / xác minh thì làm trong cửa sổ đó.
+- TikTok chặn tải: xuất cookie TikTok từ trình duyệt ra file `cookies.txt` (tiện ích "Get cookies.txt LOCALLY")
+  và để cạnh tool.
+- Video là của tác giả gốc: dùng để tham khảo / bắt trend. Đăng lại nguyên clip của người khác dễ bị Facebook
+  gỡ vì bản quyền hoặc hạn chế page vì "nội dung không nguyên bản".
+
+**Chạy tự động mỗi ngày:** nháy đúp `cai_lich_hang_ngay.bat`, nhập giờ (ví dụ 07:00). Mỗi ngày máy tự chạy cả
+2 tool trên (máy phải đang bật). Nhật ký ở `nhat_ky_hang_ngay.txt`.
+
 ## Tool tải ảnh sản phẩm Shopee (mỗi sản phẩm 1 thư mục)
 
 1. Nháy đúp **`tai_anh_shopee.bat`**. Lần đầu tool tạo file `danh_sach_link.txt` và mở bằng Notepad.
